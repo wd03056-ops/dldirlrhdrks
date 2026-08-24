@@ -1,0 +1,124 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans:
+    'Pretendard Variable',
+    Pretendard,
+    -apple-system,
+    BlinkMacSystemFont,
+    system-ui,
+    sans-serif;
+  --color-app-bg: #f7f6f3;
+  --color-card: #ffffff;
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.06);
+  --shadow-card-hover: 0 8px 28px rgba(0, 0, 0, 0.1);
+}
+
+:root {
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    font-weight: 400;
+  }
+
+  *,
+  *::before,
+  *::after {
+    font-family: inherit;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font-family: var(--font-sans);
+  }
+
+  .text-\[10px\] {
+    font-weight: 500;
+  }
+
+  .text-\[11px\] {
+    font-weight: 500;
+  }
+
+  .text-xs {
+    font-weight: 400;
+  }
+
+  .text-\[13px\] {
+    font-weight: 400;
+  }
+
+  .text-sm {
+    font-weight: 400;
+  }
+
+  .text-\[15px\] {
+    font-weight: 400;
+  }
+
+  .text-base {
+    font-weight: 400;
+  }
+
+  .text-lg {
+    font-weight: 700;
+  }
+
+  .text-xl {
+    font-weight: 700;
+  }
+
+  .text-2xl {
+    font-weight: 700;
+  }
+}
+
+@layer components {
+  .app-shell {
+    background-color: var(--color-app-bg);
+  }
+
+  .surface-card {
+    background-color: var(--color-card);
+    border: 1px solid rgba(0, 0, 0, 0.04);
+    box-shadow: var(--shadow-card);
+  }
+
+  .surface-card-hover:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: #f7f6f3;
+  color: #000000;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
