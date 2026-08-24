@@ -1,10 +1,30 @@
 import { Environment, TossAuth, User } from '@apps-in-toss/web-framework'
 import type { AuthUser } from '../types/auth'
 
-const AUTH_STORAGE_KEY = 'woori-auth-user-v3'
+const AUTH_STORAGE_KEY = 'woori-auth-user-v5'
+
+declare global {
+  interface Window {
+    /** 빌드 없이 테스트할 때 런타임으로 인증 서버 URL을 덮어쓸 수 있어요 */
+    __TOSS_AUTH_API_URL__?: string
+  }
+}
 
 function authApiBase() {
-  return (import.meta.env.VITE_TOSS_AUTH_API_URL || '').replace(/\/$/, '')
+  const runtime =
+    typeof window !== 'undefined' ? window.__TOSS_AUTH_API_URL__ : undefined
+  return (runtime || import.meta.env.VITE_TOSS_AUTH_API_URL || '')
+    .trim()
+    .replace(/\/$/, '')
+}
+
+function consentedDataKey() {
+  return (import.meta.env.VITE_TOSS_CONSENTED_DATA_KEY || '').trim()
+}
+
+/** 파트너 서버가 공개 HTTPS로 준비됐을 때만 토스 로그인(토큰 교환)을 사용해요 */
+export function isTossLoginConfigured() {
+  return Boolean(authApiBase())
 }
 
 export function loadStoredUser(): AuthUser | null {
@@ -31,6 +51,16 @@ export function createNicknameFromId(id: string) {
   return `토스유저${suffix}`
 }
 
+/** 암호문·임시 닉네임이 아닌지 */
+export function isDisplayableUserName(name: string | null | undefined) {
+  if (!name) return false
+  const value = name.trim()
+  if (!value) return false
+  if (/^토스유저/i.test(value)) return false
+  if (value.length > 40 && /^[A-Za-z0-9+/=_-]+$/.test(value)) return false
+  return true
+}
+
 export function isInTossApp() {
   try {
     return (
@@ -47,47 +77,146 @@ function createTempUserId() {
     : String(Date.now())
 }
 
+/**
+ * 콘솔에 등록한 동의 키로 실명(USER_NAME)을 가져와요.
+ * @see https://developers-apps-in-toss.toss.im/documentation/common/user-info
+ */
+export async function fetchConsentedUserName(): Promise<string | null> {
+  const key = consentedDataKey()
+  if (!key) return null
+
+  try {
+    if (!User.getConsentedData.isSupported()) return null
+    const data = await User.getConsentedData({
+      consentedUserDataKey: key,
+      shouldRequestAgreementWhenUserDeclined: false,
+    })
+    const name = data?.USER_NAME?.trim()
+    return isDisplayableUserName(name) ? name! : null
+  } catch (error) {
+    console.warn('[Auth] getConsentedData(USER_NAME) 실패', error)
+    return null
+  }
+}
+
+async function resolveDisplayName(fallbackId: string, preferred?: string | null) {
+  if (isDisplayableUserName(preferred)) return preferred!.trim()
+
+  const consented = await fetchConsentedUserName()
+  if (consented) return consented
+
+  return createNicknameFromId(fallbackId)
+}
+
 async function exchangeAuthorizationCode(
   authorizationCode: string,
   referrer: 'DEFAULT' | 'SANDBOX',
 ): Promise<AuthUser> {
-  const response = await fetch(`${authApiBase()}/api/auth/toss-login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ authorizationCode, referrer }),
-  })
-  const payload = (await response.json().catch(() => ({}))) as {
-    user?: AuthUser
-    error?: string
+  const base = authApiBase()
+  if (!base) {
+    throw new Error(
+      '토스 로그인용 인증 서버 주소(VITE_TOSS_AUTH_API_URL)가 없어요.',
+    )
   }
+
+  const endpoint = `${base}/api/auth/toss-login`
+  let response: Response
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ authorizationCode, referrer }),
+    })
+  } catch (error) {
+    console.error('[Auth] 토큰 교환 네트워크 실패', { endpoint, error })
+    throw new Error('인증 서버에 연결하지 못했어요.')
+  }
+
+  const text = await response.text()
+  let payload: { user?: AuthUser; error?: string } = {}
+  try {
+    payload = text ? (JSON.parse(text) as typeof payload) : {}
+  } catch {
+    throw new Error('인증 서버 응답이 올바르지 않아요.')
+  }
+
   if (!response.ok || !payload.user?.id) {
     throw new Error(payload.error || '토스 로그인에 실패했어요.')
   }
-  return payload.user
+
+  const id = String(payload.user.id)
+  const name = await resolveDisplayName(id, payload.user.name)
+  return { id, name, authMethod: 'toss-login' }
 }
 
+let tossLoginInFlight: Promise<AuthUser> | null = null
+
 /**
- * 토스 로그인: 미니앱에서 인가 코드만 받은 뒤, 토큰 교환·복호화는 서버에서 처리해요.
+ * 토스 로그인 (OAuth)
+ * 클라이언트: TossAuth.login() → authorizationCode
+ * 서버: generate-token → login-me → name 복호화
  * @see https://developers-apps-in-toss.toss.im/documentation/common/authentication/toss-login
  */
 export async function loginWithToss(): Promise<AuthUser> {
-  const { authorizationCode, referrer } = await TossAuth.login()
-  const user = await exchangeAuthorizationCode(authorizationCode, referrer)
-  saveStoredUser(user)
-  return user
+  if (tossLoginInFlight) return tossLoginInFlight
+
+  tossLoginInFlight = (async (): Promise<AuthUser> => {
+    const loginResult = await TossAuth.login()
+    const authorizationCode = loginResult?.authorizationCode?.trim()
+    const referrer =
+      loginResult?.referrer === 'SANDBOX' ? 'SANDBOX' : 'DEFAULT'
+
+    if (!authorizationCode) {
+      throw new Error('인가 코드를 받지 못했어요. 다시 로그인해 주세요.')
+    }
+
+    const user = await exchangeAuthorizationCode(authorizationCode, referrer)
+    saveStoredUser(user)
+    return user
+  })()
+
+  const pending = tossLoginInFlight
+  void pending.finally(() => {
+    if (tossLoginInFlight === pending) tossLoginInFlight = null
+  })
+  return pending
 }
 
 /**
- * 브라우저 로컬 테스트용. 토스 앱에서는 사용하지 않아요.
+ * 비게임 사용자 식별키 + (가능하면) 동의 기반 실명
+ * @see https://developers-apps-in-toss.toss.im/documentation/common/authentication/hash-key
+ * @see https://developers-apps-in-toss.toss.im/documentation/common/user-info
  */
 export async function resolveAnonymousUser(): Promise<AuthUser> {
   try {
-    if (User.getAnonymousKey.isSupported()) {
-      const keyResult = await User.getAnonymousKey()
-      if (keyResult?.type === 'HASH' && keyResult.hash) {
+    if (!User.getAnonymousKey.isSupported()) {
+      console.warn('[Auth] getAnonymousKey 미지원 환경')
+    } else {
+      const keyResult: unknown = await User.getAnonymousKey()
+
+      if (keyResult === undefined) {
+        throw new Error('지원하지 않는 SDK/앱 버전이에요.')
+      }
+      if (keyResult === 'INVALID_CATEGORY') {
+        throw new Error('비게임 카테고리 미니앱에서만 식별키를 쓸 수 있어요.')
+      }
+      if (keyResult === 'ERROR') {
+        throw new Error('사용자 식별키를 가져오지 못했어요.')
+      }
+      if (
+        keyResult &&
+        typeof keyResult === 'object' &&
+        'type' in keyResult &&
+        'hash' in keyResult &&
+        (keyResult as { type: string; hash: string }).type === 'HASH' &&
+        (keyResult as { hash: string }).hash
+      ) {
+        const hash = (keyResult as { hash: string }).hash
+        const name = await resolveDisplayName(hash)
         const user: AuthUser = {
-          id: keyResult.hash,
-          name: createNicknameFromId(keyResult.hash),
+          id: hash,
+          name,
+          authMethod: 'anonymous-key',
         }
         saveStoredUser(user)
         return user
@@ -95,22 +224,51 @@ export async function resolveAnonymousUser(): Promise<AuthUser> {
     }
   } catch (error) {
     console.warn('[Auth] getAnonymousKey 실패', error)
+    if (isInTossApp()) throw error
   }
 
   const tempId = createTempUserId()
   const user: AuthUser = {
     id: `temp-${tempId}`,
-    name: createNicknameFromId(tempId),
+    name: await resolveDisplayName(tempId),
+    authMethod: 'anonymous-key',
   }
   saveStoredUser(user)
   return user
 }
 
-/** @deprecated loginWithToss / resolveAnonymousUser 사용 */
+/**
+ * 저장된 닉네임이 이상하면(토스유저·암호문) 실명으로 다시 채워요.
+ */
+export async function refreshUserDisplayName(
+  user: AuthUser,
+): Promise<AuthUser> {
+  if (isDisplayableUserName(user.name) && !/^토스유저/i.test(user.name)) {
+    return user
+  }
+
+  const name = await resolveDisplayName(user.id, null)
+  if (name === user.name) return user
+
+  const next: AuthUser = { ...user, name }
+  saveStoredUser(next)
+  return next
+}
+
+export async function startAppSession(): Promise<AuthUser> {
+  if (isTossLoginConfigured()) {
+    return loginWithToss()
+  }
+  return resolveAnonymousUser()
+}
+
+/** @deprecated startAppSession 사용 */
 export async function loginForTestPhase(): Promise<AuthUser> {
-  return isInTossApp() ? loginWithToss() : resolveAnonymousUser()
+  return startAppSession()
 }
 
 export async function restoreSession(): Promise<AuthUser | null> {
-  return loadStoredUser()
+  const stored = loadStoredUser()
+  if (!stored) return null
+  return refreshUserDisplayName(stored)
 }

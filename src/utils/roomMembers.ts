@@ -26,17 +26,15 @@ export function createRoomMember(
 
 /**
  * 멤버를 방에서 제거합니다.
- * 남은 멤버가 없으면 null을 반환해 방 전체 삭제를 의미합니다.
+ * 만든 사람이 나가도 방은 삭제되지 않고 유지됩니다.
  */
 export function leaveRoom(
   room: Room,
   user: Pick<AuthUser, 'id' | 'name'>,
-): Room | null {
+): Room {
   const nextList = room.memberList.filter(
     (member) => !isSameMember(member, user),
   )
-
-  if (nextList.length === 0) return null
 
   return {
     ...room,
@@ -51,7 +49,7 @@ function clearStoryLocalKeys(memory: RoomMemory) {
   memory.children?.forEach(clearStoryLocalKeys)
 }
 
-/** 마지막 멤버 퇴장 시 방 관련 로컬 데이터 정리 */
+/** @deprecated 방은 나가도 삭제하지 않아요. 호환용으로만 남겨 둡니다. */
 export function clearRoomLocalData(room: Room) {
   try {
     localStorage.removeItem(`story-local-edits-v1-${room.id}`)

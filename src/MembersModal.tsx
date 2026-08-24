@@ -64,7 +64,7 @@ export default function MembersModal({
               onClick={onLeaveRoom}
               className="w-full rounded-2xl border-0 bg-[#F7F6F3] py-3.5 text-sm font-semibold text-neutral-600 transition hover:bg-[#EFEDE8]"
             >
-              방 나가기
+              모임 나가기
             </button>
           ) : null}
           <button

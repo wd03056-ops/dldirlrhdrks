@@ -1,6 +1,10 @@
 import { createServer } from 'node:http'
-import { resolve } from 'node:path'
-import { decryptIfNeeded } from './decrypt.js'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  extractDisplayNameFromLoginMe,
+  isDisplayableName,
+} from './decrypt.js'
 import {
   loadEnvFile,
   parseDecryptKeyFile,
@@ -8,37 +12,69 @@ import {
 } from './loadEnv.js'
 import { fetchLoginMe, generateToken } from './tossClient.js'
 
-loadEnvFile(resolve(process.cwd(), '.env'))
+const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+loadEnvFile(resolve(PROJECT_ROOT, '.env'))
 
 const PORT = Number(process.env.AUTH_SERVER_PORT || 4000)
 
+function resolveProjectPath(filePath) {
+  if (!filePath) return ''
+  return resolve(PROJECT_ROOT, filePath)
+}
+
 function loadDecryptSecrets() {
-  const fromFile = parseDecryptKeyFile(
-    readOptionalFile(process.env.TOSS_DECRYPT_KEY_FILE),
+  const keyFile = resolveProjectPath(
+    process.env.TOSS_DECRYPT_KEY_FILE || 'secrets/toss-decrypt.key',
   )
-  const key =
-    process.env.TOSS_DECRYPT_KEY?.trim() ||
+  const aadFile = resolveProjectPath(
+    process.env.TOSS_AAD_FILE || 'secrets/toss-aad.txt',
+  )
+
+  const fromFile = parseDecryptKeyFile(readOptionalFile(keyFile))
+  const key = (
+    process.env.TOSS_DECRYPT_KEY ||
     fromFile.key ||
     ''
-  const aad =
-    process.env.TOSS_AAD?.trim() ||
-    readOptionalFile(process.env.TOSS_AAD_FILE) ||
+  )
+    .replace(/\s+/g, '')
+    .trim()
+
+  const aad = (
+    process.env.TOSS_AAD ||
+    readOptionalFile(aadFile) ||
     fromFile.aad ||
     ''
-  return { key, aad }
+  ).trim()
+
+  return { key, aad, keyFile, aadFile }
 }
 
 function allowedOrigins() {
-  return (process.env.AUTH_CORS_ORIGINS || '')
+  const fromEnv = (process.env.AUTH_CORS_ORIGINS || '')
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
+
+  const appName = 'woori-secret-space'
+  const defaults = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    `https://${appName}.web.tossmini.com`,
+    `https://${appName}.private-web.tossmini.com`,
+    `https://${appName}.apps.tossmini.com`,
+    `https://${appName}.private-apps.tossmini.com`,
+  ]
+
+  return [...new Set([...defaults, ...fromEnv])]
 }
 
 function applyCors(req, res) {
   const origin = req.headers.origin
   const allowed = allowedOrigins()
   if (origin && allowed.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Vary', 'Origin')
+  } else if (origin && /\.tossmini\.com$/.test(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin)
     res.setHeader('Vary', 'Origin')
   }
@@ -84,6 +120,15 @@ function verifyUnlinkBasicAuth(req) {
   return incomingUser === user && incomingPassword === password
 }
 
+/**
+ * 토스 로그인 콜백:
+ * 1) authorizationCode → accessToken (mTLS)
+ * 2) login-me → 암호화된 name
+ * 3) AES-256-GCM 복호화 → 실명
+ *
+ * ※ VITE_TOSS_CONSENTED_DATA_KEY 는 클라이언트 SDK(getConsentedData)용이에요.
+ *    백엔드는 login-me 응답만 복호화합니다.
+ */
 async function handleTossLogin(req, res) {
   const body = await readBody(req)
   const authorizationCode = String(body.authorizationCode || '').trim()
@@ -97,15 +142,21 @@ async function handleTossLogin(req, res) {
   if (!key || !aad) {
     sendJson(res, 503, {
       error:
-        '복호화 키 또는 AAD가 없어요. secrets/ 파일 또는 서버 .env 를 확인해 주세요.',
+        '복호화 키 또는 AAD가 없어요. secrets/toss-decrypt.key, secrets/toss-aad.txt 또는 TOSS_DECRYPT_KEY / TOSS_AAD 를 확인해 주세요.',
     })
     return
   }
 
   const tokenResult = await generateToken(authorizationCode, referrer)
   if (tokenResult.resultType !== 'SUCCESS' || !tokenResult.success?.accessToken) {
+    console.error('[auth-server] generate-token 실패', tokenResult)
     sendJson(res, 401, {
-      error: tokenResult.error?.reason || '토큰 발급에 실패했어요.',
+      error:
+        tokenResult.error?.reason ||
+        (typeof tokenResult.error === 'string'
+          ? tokenResult.error
+          : null) ||
+        '토큰 발급에 실패했어요.',
     })
     return
   }
@@ -113,6 +164,7 @@ async function handleTossLogin(req, res) {
   const accessToken = tokenResult.success.accessToken
   const meResult = await fetchLoginMe(accessToken)
   if (meResult.resultType !== 'SUCCESS' || meResult.success?.userKey == null) {
+    console.error('[auth-server] login-me 실패', meResult)
     sendJson(res, 401, {
       error: meResult.error?.reason || '사용자 정보를 가져오지 못했어요.',
     })
@@ -120,12 +172,29 @@ async function handleTossLogin(req, res) {
   }
 
   const profile = meResult.success
-  const name = decryptIfNeeded(profile.name, key, aad)
+  const extracted = extractDisplayNameFromLoginMe(profile, key, aad)
+  const displayName = isDisplayableName(extracted.name) ? extracted.name : ''
+
+  if (!displayName) {
+    console.warn('[auth-server] 실명을 추출하지 못했어요', {
+      userKey: profile.userKey,
+      hasNameField: profile.name != null && profile.name !== '',
+      nameLooksEncrypted: extracted.encrypted,
+      scope: profile.scope ?? null,
+    })
+  } else {
+    console.info('[auth-server] 실명 추출 성공', {
+      userKey: profile.userKey,
+      source: extracted.source,
+      nameLength: displayName.length,
+    })
+  }
 
   sendJson(res, 200, {
     user: {
       id: String(profile.userKey),
-      name: name || `토스유저${String(profile.userKey).slice(-4)}`,
+      name: displayName,
+      userKey: profile.userKey,
     },
   })
 }
@@ -165,10 +234,18 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/health') {
       const { key, aad } = loadDecryptSecrets()
+      let keyBytes = 0
+      try {
+        keyBytes = key ? Buffer.from(key, 'base64').length : 0
+      } catch {
+        keyBytes = -1
+      }
       sendJson(res, 200, {
         ok: true,
         decryptKeyLoaded: Boolean(key),
+        decryptKeyBytes: keyBytes,
         aadLoaded: Boolean(aad),
+        aadLength: aad.length,
       })
       return
     }
@@ -197,6 +274,14 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   const { key, aad } = loadDecryptSecrets()
+  let keyBytes = 0
+  try {
+    keyBytes = key ? Buffer.from(key, 'base64').length : 0
+  } catch {
+    keyBytes = -1
+  }
   console.info(`Toss auth server listening on http://localhost:${PORT}`)
-  console.info(`decrypt key: ${key ? 'loaded' : 'missing'}, aad: ${aad ? 'loaded' : 'missing'}`)
+  console.info(
+    `decrypt key: ${key ? `loaded (${keyBytes} bytes)` : 'missing'}, aad: ${aad ? `loaded (len ${aad.length})` : 'missing'}`,
+  )
 })

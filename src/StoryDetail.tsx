@@ -225,6 +225,7 @@ export default function StoryDetail({
           initialTitle={story.title}
           initialContent={story.content ?? ''}
           initialPhotos={photos}
+          isSaving={isSaving}
           onClose={() => {
             if (isSaving) return
             setIsWriteModalOpen(false)

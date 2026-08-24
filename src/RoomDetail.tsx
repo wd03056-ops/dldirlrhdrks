@@ -14,6 +14,7 @@ import {
   storiesToDisplayMemories,
   updateStory,
 } from './services/storyService'
+import { resolveRemotePhotoUrls } from './services/storageService'
 import { useAuth } from './context/AuthContext'
 import { useRegisterBackHandler } from './context/AppsInTossNavigationContext'
 import { useToast } from './context/ToastContext'
@@ -719,13 +720,27 @@ export default function RoomDetail({
   }) => {
     if (entries.length === 0) return
 
-    const { title, content, photos, coverPhoto } =
-      draftEntriesToStoryFields(entries)
-    if (!title && !content && photos.length === 0) return
+    const draftFields = draftEntriesToStoryFields(entries)
+    if (
+      !draftFields.title &&
+      !draftFields.content &&
+      draftFields.photos.length === 0
+    ) {
+      return
+    }
 
     const targetRoomId = resolveFirestoreRoomId(room.id)
     setIsSavingStory(true)
     try {
+      const photos = await resolveRemotePhotoUrls(
+        draftFields.photos,
+        targetRoomId,
+        mode === 'create' ? undefined : target?.id,
+      )
+      const coverPhoto = photos[0] ?? null
+      const title = draftFields.title
+      const content = draftFields.content
+
       if (mode === 'append' && target) {
         const slides =
           photos.length > 0
@@ -861,7 +876,12 @@ export default function RoomDetail({
       setStoryMode('create')
     } catch (error) {
       console.error('[RoomDetail] 이야기 저장 실패', error)
-      showToast('저장에 실패했어요')
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : '저장에 실패했어요'
+      showToast(message)
+      throw error
     } finally {
       setIsSavingStory(false)
     }
@@ -925,6 +945,7 @@ export default function RoomDetail({
           storyMode === 'append' ? '' : (editingStory?.content ?? '')
         }
         initialPhotos={editPhotos}
+        isSaving={isSavingStory}
         onClose={() => {
           if (isSavingStory) return
           setIsWriteOpen(false)
@@ -932,6 +953,7 @@ export default function RoomDetail({
           setStoryMode('create')
         }}
         onSave={handleSaveStory}
+        onUploadError={(message) => showToast(message)}
         onDelete={
           storyMode === 'edit' && editingStory
             ? () => handleDeleteStory(editingStory.id)

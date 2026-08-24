@@ -9,10 +9,8 @@ import {
 } from 'react'
 import {
   clearStoredUser,
-  isInTossApp,
-  loginWithToss,
-  resolveAnonymousUser,
   restoreSession,
+  startAppSession,
 } from '../services/tossAuth'
 import type { AuthUser } from '../types/auth'
 
@@ -28,6 +26,11 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) return error.message
+  return fallback
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isInitializing, setIsInitializing] = useState(true)
@@ -39,12 +42,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function boot() {
       try {
-        if (isInTossApp()) {
-          const nextUser = await loginWithToss()
-          if (!cancelled) setUser(nextUser)
-          return
-        }
-
         const restored = await restoreSession()
         if (cancelled) return
         if (restored) {
@@ -52,14 +49,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        const nextUser = await resolveAnonymousUser()
+        // 비게임 기본: 식별키로 바로 시작 (별도 로그인 화면 없음)
+        const nextUser = await startAppSession()
         if (!cancelled) setUser(nextUser)
-      } catch {
+      } catch (bootError) {
+        console.error('[Auth] boot 실패', bootError)
         if (!cancelled) {
           setError(
-            isInTossApp()
-              ? '토스 로그인을 완료해 주세요.'
-              : '사용자를 확인하지 못했어요. 다시 시도해 주세요.',
+            errorMessage(
+              bootError,
+              '사용자를 확인하지 못했어요. 다시 시도해 주세요.',
+            ),
           )
         }
       } finally {
@@ -77,12 +77,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoggingIn(true)
     setError(null)
     try {
-      const loggedInUser = isInTossApp()
-        ? await loginWithToss()
-        : await resolveAnonymousUser()
+      const loggedInUser = await startAppSession()
       setUser(loggedInUser)
-    } catch {
-      setError('시작에 실패했어요. 다시 시도해 주세요.')
+    } catch (loginError) {
+      console.error('[Auth] login 실패', loginError)
+      setError(
+        errorMessage(loginError, '시작에 실패했어요. 다시 시도해 주세요.'),
+      )
     } finally {
       setIsLoggingIn(false)
     }

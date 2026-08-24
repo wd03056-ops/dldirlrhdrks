@@ -1,4 +1,4 @@
-import { Clipboard } from '@apps-in-toss/web-framework'
+import { Clipboard, Share } from '@apps-in-toss/web-framework'
 
 /** 겹치지 않는 무작위 방 주소용 ID (UUID 기반) */
 export function createRoomSlug() {
@@ -52,7 +52,6 @@ export function buildIntossRoomPath(slug: string) {
 export async function buildInviteShareLink(slug: string) {
   const intossPath = buildIntossRoomPath(slug)
   try {
-    const { Share } = await import('@apps-in-toss/web-framework')
     return await Share.createLink({ path: intossPath })
   } catch {
     return buildRoomUrl(slug)

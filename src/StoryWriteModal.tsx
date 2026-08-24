@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  assertValidUploadFile,
+  StorageUploadError,
+} from './services/storageService'
 
 export type StoryDraftEntry = {
   photo: string | null
@@ -14,9 +18,11 @@ type StoryWriteModalProps = {
   initialTitle?: string
   initialContent?: string
   initialPhotos?: string[]
+  isSaving?: boolean
   onClose: () => void
-  onSave: (data: { entries: StoryDraftEntry[] }) => void
+  onSave: (data: { entries: StoryDraftEntry[] }) => void | Promise<void>
   onDelete?: () => void
+  onUploadError?: (message: string) => void
 }
 
 type DraftEntry = {
@@ -56,9 +62,11 @@ export default function StoryWriteModal({
   initialTitle = '',
   initialContent = '',
   initialPhotos = [],
+  isSaving = false,
   onClose,
   onSave,
   onDelete,
+  onUploadError,
 }: StoryWriteModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const photoStripRef = useRef<HTMLDivElement>(null)
@@ -68,13 +76,16 @@ export default function StoryWriteModal({
   const [composeContent, setComposeContent] = useState('')
   const [draftTitle, setDraftTitle] = useState('')
   const [activePhotoIndex, setActivePhotoIndex] = useState(0)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const isEdit = mode === 'edit'
   const isAppend = mode === 'append'
+  const busy = isSaving || isSubmitting
 
   useEffect(() => {
     if (!isOpen) {
       seededKeyRef.current = null
+      setIsSubmitting(false)
       return
     }
 
@@ -126,6 +137,7 @@ export default function StoryWriteModal({
     setComposeContent('')
     setDraftTitle('')
     setActivePhotoIndex(0)
+    setIsSubmitting(false)
   }
 
   const scrollPhotoStripTo = (index: number) => {
@@ -140,58 +152,87 @@ export default function StoryWriteModal({
   }
 
   const handleClose = () => {
+    if (busy) return
     resetState()
     onClose()
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (busy) return
     const title = draftTitle.trim()
+    let payload: { entries: StoryDraftEntry[] } | null = null
 
     if (isEdit) {
       const content = (draftEntries[0]?.content ?? textOnlyContent).trim()
       if (!content && draftEntries.length === 0 && !title) return
       if (draftEntries.length > 0) {
-        onSave({
+        payload = {
           entries: draftEntries.map((entry) => ({
             photo: entry.photo,
             content,
             title,
           })),
-        })
+        }
       } else {
-        onSave({
+        payload = {
           entries: [{ photo: null, content, title }],
-        })
+        }
       }
     } else if (draftEntries.length > 0) {
       const content = composeContent.trim()
-      onSave({
+      payload = {
         entries: draftEntries.map((entry) => ({
           photo: entry.photo,
           content,
           title,
         })),
-      })
+      }
     } else if (textOnlyContent.trim() || title) {
-      onSave({
+      payload = {
         entries: [{ photo: null, content: textOnlyContent.trim(), title }],
-      })
+      }
     } else {
       return
     }
 
-    resetState()
+    setIsSubmitting(true)
+    try {
+      await onSave(payload)
+      resetState()
+    } catch {
+      // 부모에서 토스트 처리. 초안은 유지해요.
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
-    if (!files || files.length === 0) return
+    if (!files || files.length === 0 || busy) return
 
     const selectedFiles = Array.from(files)
     e.target.value = ''
 
+    const accepted: File[] = []
+    for (const file of selectedFiles) {
+      try {
+        assertValidUploadFile(file, {
+          fileName: file.name,
+          contentType: file.type,
+        })
+        accepted.push(file)
+      } catch (error) {
+        const message =
+          error instanceof StorageUploadError
+            ? error.message
+            : '업로드할 수 없는 파일이에요.'
+        onUploadError?.(message)
+      }
+    }
+    if (accepted.length === 0) return
+
     const newPhotos = await Promise.all(
-      selectedFiles.map((file) => readFileAsDataUrl(file)),
+      accepted.map((file) => readFileAsDataUrl(file)),
     )
     if (newPhotos.length === 0) return
 
@@ -218,6 +259,7 @@ export default function StoryWriteModal({
   }
 
   const removePhoto = (index: number) => {
+    if (busy) return
     setDraftEntries((prev) => {
       const removed = prev[index]
       const next = prev.filter((_, i) => i !== index)
@@ -238,16 +280,18 @@ export default function StoryWriteModal({
     )
   }
 
-  const canSave = isEdit
-    ? Boolean(
-        draftEntries[0]?.content.trim() ||
-          draftEntries[0]?.photo ||
-          textOnlyContent.trim() ||
-          draftTitle.trim(),
-      )
-    : draftEntries.length > 0 ||
-      Boolean(textOnlyContent.trim()) ||
-      Boolean(draftTitle.trim())
+  const canSave =
+    !busy &&
+    (isEdit
+      ? Boolean(
+          draftEntries[0]?.content.trim() ||
+            draftEntries[0]?.photo ||
+            textOnlyContent.trim() ||
+            draftTitle.trim(),
+        )
+      : draftEntries.length > 0 ||
+        Boolean(textOnlyContent.trim()) ||
+        Boolean(draftTitle.trim()))
 
   const sharedComposeContent = isEdit
     ? (draftEntries[0]?.content ?? textOnlyContent)
@@ -258,7 +302,7 @@ export default function StoryWriteModal({
     : isAppend
       ? '사진/글 추가'
       : '글 작성'
-  const headerAction = isEdit ? '완료' : '등록'
+  const headerAction = busy ? '저장 중...' : isEdit ? '완료' : '등록'
   const guideText = isEdit
     ? '내가 작성한 사진과 글을 수정할 수 있어요.'
     : isAppend
@@ -271,7 +315,8 @@ export default function StoryWriteModal({
         <button
           type="button"
           onClick={handleClose}
-          className="flex h-9 w-9 items-center justify-center rounded-full text-lg text-black transition hover:bg-stone-100"
+          disabled={busy}
+          className="flex h-9 w-9 items-center justify-center rounded-full text-lg text-black transition hover:bg-stone-100 disabled:opacity-40"
           aria-label="닫기"
         >
           ✕
@@ -279,7 +324,7 @@ export default function StoryWriteModal({
         <h1 className="text-sm font-semibold text-black">{headerTitle}</h1>
         <button
           type="button"
-          onClick={handleSave}
+          onClick={() => void handleSave()}
           disabled={!canSave}
           className="text-sm font-semibold text-black transition disabled:text-stone-300"
         >
@@ -289,13 +334,19 @@ export default function StoryWriteModal({
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
         <p className="mb-4 text-xs text-stone-400">{guideText}</p>
+        {busy ? (
+          <p className="mb-4 text-xs font-medium text-stone-500">
+            사진을 업로드하고 글을 저장하는 중이에요…
+          </p>
+        ) : null}
 
         <input
           type="text"
           value={draftTitle}
           onChange={(e) => setDraftTitle(e.target.value)}
           placeholder="제목을 입력해 보세요."
-          className="mb-4 w-full border-0 border-b border-stone-200 bg-transparent pb-2 text-base font-semibold text-black placeholder:text-stone-400 focus:border-black focus:outline-none"
+          disabled={busy}
+          className="mb-4 w-full border-0 border-b border-stone-200 bg-transparent pb-2 text-base font-semibold text-black placeholder:text-stone-400 focus:border-black focus:outline-none disabled:opacity-60"
         />
 
         <div className="mb-4">
@@ -327,7 +378,8 @@ export default function StoryWriteModal({
                     <button
                       type="button"
                       onClick={() => removePhoto(index)}
-                      className="absolute top-3 right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-sm font-medium text-white backdrop-blur-[2px] transition hover:bg-black/70"
+                      disabled={busy}
+                      className="absolute top-3 right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-sm font-medium text-white backdrop-blur-[2px] transition hover:bg-black/70 disabled:opacity-40"
                       aria-label="사진 취소"
                     >
                       ✕
@@ -355,7 +407,8 @@ export default function StoryWriteModal({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="relative flex aspect-[4/5] w-full items-center justify-center rounded-3xl border border-stone-200 bg-white text-stone-400 transition hover:border-stone-300 hover:text-stone-500"
+              disabled={busy}
+              className="relative flex aspect-[4/5] w-full items-center justify-center rounded-3xl border border-stone-200 bg-white text-stone-400 transition hover:border-stone-300 hover:text-stone-500 disabled:opacity-50"
               aria-label="사진 추가"
             >
               <svg
@@ -379,7 +432,8 @@ export default function StoryWriteModal({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="mt-3 w-full rounded-2xl border border-dashed border-stone-300 bg-stone-50 py-3 text-xs font-semibold text-stone-500 transition hover:border-stone-400 hover:text-stone-700"
+              disabled={busy}
+              className="mt-3 w-full rounded-2xl border border-dashed border-stone-300 bg-stone-50 py-3 text-xs font-semibold text-stone-500 transition hover:border-stone-400 hover:text-stone-700 disabled:opacity-50"
             >
               + 사진 추가
             </button>
@@ -408,14 +462,16 @@ export default function StoryWriteModal({
               }
             }}
             placeholder="글을 작성해보세요."
-            className="mb-4 min-h-[160px] w-full resize-none border-0 bg-transparent text-[15px] leading-relaxed text-black placeholder:text-stone-400 focus:outline-none"
+            disabled={busy}
+            className="mb-4 min-h-[160px] w-full resize-none border-0 bg-transparent text-[15px] leading-relaxed text-black placeholder:text-stone-400 focus:outline-none disabled:opacity-60"
           />
         ) : (
           <textarea
             value={textOnlyContent}
             onChange={(e) => setTextOnlyContent(e.target.value)}
             placeholder="사진 없이 글만 남길 수도 있어요..."
-            className="mb-4 min-h-[160px] w-full resize-none border-0 bg-transparent text-[15px] leading-relaxed text-black placeholder:text-stone-400 focus:outline-none"
+            disabled={busy}
+            className="mb-4 min-h-[160px] w-full resize-none border-0 bg-transparent text-[15px] leading-relaxed text-black placeholder:text-stone-400 focus:outline-none disabled:opacity-60"
           />
         )}
 
@@ -423,7 +479,8 @@ export default function StoryWriteModal({
           <button
             type="button"
             onClick={onDelete}
-            className="mb-8 w-full py-2 text-center text-sm font-semibold text-[#B85C5C] transition hover:text-[#8A3A3A]"
+            disabled={busy}
+            className="mb-8 w-full py-2 text-center text-sm font-semibold text-[#B85C5C] transition hover:text-[#8A3A3A] disabled:opacity-40"
           >
             글 삭제
           </button>
@@ -436,7 +493,7 @@ export default function StoryWriteModal({
         accept="image/*"
         multiple
         className="hidden"
-        onChange={handleFileChange}
+        onChange={(e) => void handleFileChange(e)}
       />
     </div>
   )

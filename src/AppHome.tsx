@@ -30,10 +30,8 @@ import {
   withRoomSlug,
 } from './utils/roomStorage'
 import {
-  clearRoomLocalData,
   createRoomMember,
   isRoomMember,
-  isSameMember,
   leaveRoom,
 } from './utils/roomMembers'
 
@@ -63,15 +61,50 @@ function joinRoomWithUser(room: Room, user: { id: string; name: string }) {
 
 function RoomCard({
   room,
+  leaveMode = false,
   onOpen,
   onEdit,
+  onLeave,
 }: {
   room: Room
+  leaveMode?: boolean
   onOpen: () => void
   onEdit: () => void
+  onLeave?: () => void
 }) {
   const coverPhoto = getRoomCoverPhoto(room)
   const pressHandlers = useLongPress(onEdit, onOpen)
+
+  if (leaveMode) {
+    return (
+      <button
+        type="button"
+        onClick={onLeave}
+        className="group flex flex-col text-left"
+      >
+        <div className="relative flex aspect-[5/4] w-full cursor-pointer items-center justify-center overflow-hidden rounded-[22px] bg-white shadow-[0_8px_28px_rgba(0,0,0,0.1)] ring-1 ring-black/5 transition group-hover:shadow-[0_12px_32px_rgba(0,0,0,0.14)]">
+          {coverPhoto ? (
+            <img
+              src={coverPhoto}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          ) : (
+            <RoomCoverPlaceholder className="absolute inset-0 h-full w-full" />
+          )}
+          <div className="absolute inset-0 bg-black/45" />
+          <div className="relative z-10 flex flex-col items-center px-3 text-center">
+            <p className="text-base font-bold tracking-tight text-white">
+              나가기
+            </p>
+            <p className="mt-1 line-clamp-1 text-[11px] text-white/85">
+              {room.title}
+            </p>
+          </div>
+        </div>
+      </button>
+    )
+  }
 
   return (
     <button
@@ -127,6 +160,7 @@ export default function AppHome() {
   const [editingRoom, setEditingRoom] = useState<Room | null>(null)
   const [isRoomEditOpen, setIsRoomEditOpen] = useState(false)
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false)
+  const [isLeaveMode, setIsLeaveMode] = useState(false)
 
   // 진입 시 자동 바텀시트/모달 금지 (비게임 UX 가이드)
   // 도움말은 사용자가 탭했을 때만 연다.
@@ -224,6 +258,10 @@ export default function AppHome() {
       setIsCenterMenuOpen(false)
       return true
     }
+    if (isLeaveMode) {
+      setIsLeaveMode(false)
+      return true
+    }
     if (selectedRoomId !== null) {
       setSelectedRoomId(null)
       replaceRoomLocation(null)
@@ -239,32 +277,20 @@ export default function AppHome() {
   const handleLeaveRoom = (room: Room) => {
     if (!user) return
 
-    const isLastMember =
-      room.memberList.filter((member) => !isSameMember(member, user)).length ===
-      0
-
     const confirmed = window.confirm(
-      isLastMember
-        ? `마지막 구성원입니다. 나가면 ‘${room.title}’ 공간과 추억이 모두 삭제됩니다. 나갈까요?`
-        : `‘${room.title}’ 공간에서 나갈까요? 다른 구성원의 추억은 그대로 남아요.`,
+      `‘${room.title}’ 모임에서 나갈까요?\n모임과 글은 그대로 남아 다른 구성원이 계속 쓸 수 있어요.`,
     )
     if (!confirmed) return
 
     const nextRoom = leaveRoom(room, user)
-
-    if (nextRoom === null) {
-      clearRoomLocalData(room)
-      persistRooms(rooms.filter((item) => item.id !== room.id))
-      showToast('마지막 구성원이 나가 공간이 삭제되었어요.')
-    } else {
-      persistRooms(
-        rooms.map((item) => (item.id === room.id ? nextRoom : item)),
-      )
-      showToast('공간에서 나갔어요.')
-    }
+    persistRooms(
+      rooms.map((item) => (item.id === room.id ? nextRoom : item)),
+    )
+    showToast('모임에서 나갔어요. 모임은 그대로 유지돼요.')
 
     setSelectedRoomId(null)
     replaceRoomLocation(null)
+    setIsLeaveMode(false)
   }
 
   const handleComplete = (room: { name: string; inviteMsg: string }) => {
@@ -331,17 +357,29 @@ export default function AppHome() {
 
             <div className="mb-4 flex flex-1 flex-col">
               <div className="mb-4 flex items-center justify-between gap-2">
-                <div className="flex min-w-0 flex-1 items-center gap-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                   <span className="shrink-0 text-lg font-semibold text-black">
                     모임
                   </span>
                   <button
                     type="button"
                     onClick={() => setIsCopyLinkOpen(true)}
-                    disabled={myRooms.length === 0}
+                    disabled={myRooms.length === 0 || isLeaveMode}
                     className="shrink-0 rounded-full border-0 bg-white px-3 py-1.5 text-[11px] font-semibold text-black shadow-[0_4px_16px_rgba(0,0,0,0.06)] transition hover:shadow-[0_6px_20px_rgba(0,0,0,0.1)] disabled:opacity-40"
                   >
                     초대 주소 복사
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsLeaveMode((prev) => !prev)}
+                    disabled={myRooms.length === 0}
+                    className={`shrink-0 rounded-full border-0 px-3 py-1.5 text-[11px] font-semibold shadow-[0_4px_16px_rgba(0,0,0,0.06)] transition disabled:opacity-40 ${
+                      isLeaveMode
+                        ? 'bg-black text-white'
+                        : 'bg-white text-black hover:shadow-[0_6px_20px_rgba(0,0,0,0.1)]'
+                    }`}
+                  >
+                    {isLeaveMode ? '취소' : '모임 나가기'}
                   </button>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -350,6 +388,12 @@ export default function AppHome() {
                   </span>
                 </div>
               </div>
+
+              {isLeaveMode && myRooms.length > 0 ? (
+                <p className="mb-3 text-xs text-neutral-500">
+                  나갈 모임을 눌러 주세요. 만든 모임이어도 글과 모임은 유지돼요.
+                </p>
+              ) : null}
 
               {myRooms.length === 0 ? (
                 <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
@@ -363,11 +407,13 @@ export default function AppHome() {
                     <RoomCard
                       key={room.id}
                       room={room}
+                      leaveMode={isLeaveMode}
                       onOpen={() => openRoom(room)}
                       onEdit={() => {
                         setEditingRoom(room)
                         setIsRoomEditOpen(true)
                       }}
+                      onLeave={() => handleLeaveRoom(room)}
                     />
                   ))}
                 </div>
