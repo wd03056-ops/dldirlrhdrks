@@ -97,21 +97,14 @@ function formatMb(bytes: number) {
 }
 
 /**
- * 용량·이미지 형식 검사. 통과하지 못하면 StorageUploadError.
+ * 이미지 MIME만 검사 (압축 전 원본은 용량 제한을 건너뜁니다).
  */
-export function assertValidUploadFile(
+export function assertValidImageType(
   blob: Blob,
   options?: { fileName?: string; contentType?: string },
 ) {
   if (blob.size <= 0) {
     throw new StorageUploadError('invalid-type', '빈 파일은 업로드할 수 없어요.')
-  }
-
-  if (blob.size > MAX_UPLOAD_BYTES) {
-    throw new StorageUploadError(
-      'file-too-large',
-      `파일 크기는 ${formatMb(MAX_UPLOAD_BYTES)} 이하여야 해요. (현재 ${formatMb(blob.size)})`,
-    )
   }
 
   const contentType = normalizeMime(
@@ -121,6 +114,23 @@ export function assertValidUploadFile(
     throw new StorageUploadError(
       'invalid-type',
       'JPEG, PNG, WebP, GIF, HEIC 이미지만 업로드할 수 있어요.',
+    )
+  }
+}
+
+/**
+ * 용량·이미지 형식 검사. 통과하지 못하면 StorageUploadError.
+ */
+export function assertValidUploadFile(
+  blob: Blob,
+  options?: { fileName?: string; contentType?: string },
+) {
+  assertValidImageType(blob, options)
+
+  if (blob.size > MAX_UPLOAD_BYTES) {
+    throw new StorageUploadError(
+      'file-too-large',
+      `파일 크기는 ${formatMb(MAX_UPLOAD_BYTES)} 이하여야 해요. (현재 ${formatMb(blob.size)})`,
     )
   }
 }

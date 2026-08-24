@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  assertValidImageType,
   assertValidUploadFile,
   StorageUploadError,
 } from './services/storageService'
+import { compressImageFile } from './utils/compressImage'
 
 export type StoryDraftEntry = {
   photo: string | null
@@ -77,15 +79,17 @@ export default function StoryWriteModal({
   const [draftTitle, setDraftTitle] = useState('')
   const [activePhotoIndex, setActivePhotoIndex] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCompressing, setIsCompressing] = useState(false)
 
   const isEdit = mode === 'edit'
   const isAppend = mode === 'append'
-  const busy = isSaving || isSubmitting
+  const busy = isSaving || isSubmitting || isCompressing
 
   useEffect(() => {
     if (!isOpen) {
       seededKeyRef.current = null
       setIsSubmitting(false)
+      setIsCompressing(false)
       return
     }
 
@@ -213,49 +217,59 @@ export default function StoryWriteModal({
     const selectedFiles = Array.from(files)
     e.target.value = ''
 
-    const accepted: File[] = []
-    for (const file of selectedFiles) {
-      try {
-        assertValidUploadFile(file, {
-          fileName: file.name,
-          contentType: file.type,
-        })
-        accepted.push(file)
-      } catch (error) {
-        const message =
-          error instanceof StorageUploadError
-            ? error.message
-            : '업로드할 수 없는 파일이에요.'
-        onUploadError?.(message)
+    setIsCompressing(true)
+    try {
+      const compressedFiles: File[] = []
+      for (const file of selectedFiles) {
+        try {
+          assertValidImageType(file, {
+            fileName: file.name,
+            contentType: file.type,
+          })
+          const compressed = await compressImageFile(file)
+          assertValidUploadFile(compressed, {
+            fileName: compressed.name,
+            contentType: compressed.type,
+          })
+          compressedFiles.push(compressed)
+        } catch (error) {
+          const message =
+            error instanceof StorageUploadError
+              ? error.message
+              : '이미지를 압축하지 못했어요. 다른 사진을 선택해 주세요.'
+          onUploadError?.(message)
+        }
       }
-    }
-    if (accepted.length === 0) return
+      if (compressedFiles.length === 0) return
 
-    const newPhotos = await Promise.all(
-      accepted.map((file) => readFileAsDataUrl(file)),
-    )
-    if (newPhotos.length === 0) return
+      const newPhotos = await Promise.all(
+        compressedFiles.map((file) => readFileAsDataUrl(file)),
+      )
+      if (newPhotos.length === 0) return
 
-    const prevCount = draftEntries.length
-    const nextActiveIndex = prevCount + newPhotos.length - 1
-    setDraftEntries((prev) => {
-      if (isEdit && prev.length === 0) {
-        const content = textOnlyContent
-        return newPhotos.map((photo, index) =>
-          createDraftEntry(photo, index === 0 ? content : ''),
-        )
+      const prevCount = draftEntries.length
+      const nextActiveIndex = prevCount + newPhotos.length - 1
+      setDraftEntries((prev) => {
+        if (isEdit && prev.length === 0) {
+          const content = textOnlyContent
+          return newPhotos.map((photo, index) =>
+            createDraftEntry(photo, index === 0 ? content : ''),
+          )
+        }
+        return [
+          ...prev,
+          ...newPhotos.map((photo) => createDraftEntry(photo)),
+        ]
+      })
+
+      if (isEdit) {
+        setTextOnlyContent('')
       }
-      return [
-        ...prev,
-        ...newPhotos.map((photo) => createDraftEntry(photo)),
-      ]
-    })
 
-    if (isEdit) {
-      setTextOnlyContent('')
+      scrollPhotoStripTo(nextActiveIndex)
+    } finally {
+      setIsCompressing(false)
     }
-
-    scrollPhotoStripTo(nextActiveIndex)
   }
 
   const removePhoto = (index: number) => {
@@ -334,7 +348,11 @@ export default function StoryWriteModal({
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
         <p className="mb-4 text-xs text-stone-400">{guideText}</p>
-        {busy ? (
+        {isCompressing ? (
+          <p className="mb-4 text-xs font-medium text-stone-500">
+            사진을 압축하는 중이에요…
+          </p>
+        ) : isSaving || isSubmitting ? (
           <p className="mb-4 text-xs font-medium text-stone-500">
             사진을 업로드하고 글을 저장하는 중이에요…
           </p>

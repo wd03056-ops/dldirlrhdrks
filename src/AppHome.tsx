@@ -531,6 +531,7 @@ export default function AppHome() {
           setEditingRoom(null)
           showToast('모임이 수정되었어요.')
         }}
+        onUploadError={(message) => showToast(message)}
       />
     </div>
   )
