@@ -2,10 +2,14 @@ rules_version = '2';
 
 // Firebase Console → Storage → Rules 에 배포하거나
 // `firebase deploy --only storage` 로 적용하세요.
+//
+// 쓰기는 Firebase Auth(토스 Custom Token 로그인) 세션이 필요합니다.
+// 익명(signInAnonymously) 사용자는 허용하지 않습니다.
 service firebase.storage {
   match /b/{bucket}/o {
     function isLoggedIn() {
-      return request.auth != null;
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
 
     function isImage() {
@@ -18,7 +22,6 @@ service firebase.storage {
         || request.resource.contentType.matches('image/heif');
     }
 
-    // 프론트 MAX_UPLOAD_BYTES(5MB)와 동일
     function isUnderSizeLimit() {
       return request.resource.size > 0
         && request.resource.size <= 5 * 1024 * 1024;
@@ -28,14 +31,12 @@ service firebase.storage {
       return isLoggedIn() && isImage() && isUnderSizeLimit();
     }
 
-    // 방 스토리 사진
     match /rooms/{roomId}/{allPaths=**} {
       allow read: if isLoggedIn();
       allow create, update: if canWriteImage();
       allow delete: if isLoggedIn();
     }
 
-    // 그 외 경로도 동일 정책 (실수 업로드 방지)
     match /{allPaths=**} {
       allow read: if isLoggedIn();
       allow create, update: if canWriteImage();

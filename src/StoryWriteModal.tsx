@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import ImageCropEditor from './ImageCropEditor'
 import {
   assertValidImageType,
   assertValidUploadFile,
@@ -80,16 +81,20 @@ export default function StoryWriteModal({
   const [activePhotoIndex, setActivePhotoIndex] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCompressing, setIsCompressing] = useState(false)
+  /** 압축 후 편집 대기열 (data URL) */
+  const [editQueue, setEditQueue] = useState<string[]>([])
 
   const isEdit = mode === 'edit'
   const isAppend = mode === 'append'
-  const busy = isSaving || isSubmitting || isCompressing
+  const isEditingPhoto = editQueue.length > 0
+  const busy = isSaving || isSubmitting || isCompressing || isEditingPhoto
 
   useEffect(() => {
     if (!isOpen) {
       seededKeyRef.current = null
       setIsSubmitting(false)
       setIsCompressing(false)
+      setEditQueue([])
       return
     }
 
@@ -142,6 +147,27 @@ export default function StoryWriteModal({
     setDraftTitle('')
     setActivePhotoIndex(0)
     setIsSubmitting(false)
+    setEditQueue([])
+  }
+
+  const handleCropConfirm = async (croppedDataUrl: string) => {
+    setDraftEntries((prev) => {
+      const next =
+        isEdit && prev.length === 0
+          ? [createDraftEntry(croppedDataUrl, textOnlyContent)]
+          : [...prev, createDraftEntry(croppedDataUrl)]
+      scrollPhotoStripTo(next.length - 1)
+      return next
+    })
+    if (isEdit) {
+      setTextOnlyContent('')
+    }
+    setEditQueue((queue) => queue.slice(1))
+  }
+
+  const handleCropCancel = () => {
+    // 편집 중인 사진과 대기열을 모두 취소
+    setEditQueue([])
   }
 
   const scrollPhotoStripTo = (index: number) => {
@@ -247,26 +273,8 @@ export default function StoryWriteModal({
       )
       if (newPhotos.length === 0) return
 
-      const prevCount = draftEntries.length
-      const nextActiveIndex = prevCount + newPhotos.length - 1
-      setDraftEntries((prev) => {
-        if (isEdit && prev.length === 0) {
-          const content = textOnlyContent
-          return newPhotos.map((photo, index) =>
-            createDraftEntry(photo, index === 0 ? content : ''),
-          )
-        }
-        return [
-          ...prev,
-          ...newPhotos.map((photo) => createDraftEntry(photo)),
-        ]
-      })
-
-      if (isEdit) {
-        setTextOnlyContent('')
-      }
-
-      scrollPhotoStripTo(nextActiveIndex)
+      // 바로 초안에 넣지 않고, 편집 창을 거쳐 등록해요.
+      setEditQueue((prev) => [...prev, ...newPhotos])
     } finally {
       setIsCompressing(false)
     }
@@ -350,7 +358,11 @@ export default function StoryWriteModal({
         <p className="mb-4 text-xs text-stone-400">{guideText}</p>
         {isCompressing ? (
           <p className="mb-4 text-xs font-medium text-stone-500">
-            사진을 압축하는 중이에요…
+            사진을 준비하는 중이에요…
+          </p>
+        ) : isEditingPhoto ? (
+          <p className="mb-4 text-xs font-medium text-stone-500">
+            사진 편집을 완료해 주세요…
           </p>
         ) : isSaving || isSubmitting ? (
           <p className="mb-4 text-xs font-medium text-stone-500">
@@ -513,6 +525,22 @@ export default function StoryWriteModal({
         className="hidden"
         onChange={(e) => void handleFileChange(e)}
       />
+
+      {editQueue[0] ? (
+        <ImageCropEditor
+          key={editQueue[0].slice(0, 64)}
+          imageSrc={editQueue[0]}
+          aspect={4 / 5}
+          title="사진 편집"
+          queueLabel={
+            editQueue.length > 1
+              ? `남은 사진 ${editQueue.length}장`
+              : undefined
+          }
+          onCancel={handleCropCancel}
+          onConfirm={handleCropConfirm}
+        />
+      ) : null}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import ImageCropEditor from './ImageCropEditor'
 import {
   assertValidImageType,
   assertValidUploadFile,
@@ -37,6 +38,10 @@ export default function StoryModal({
   const [title, setTitle] = useState(initialTitle)
   const [photos, setPhotos] = useState<string[]>([])
   const [isCompressing, setIsCompressing] = useState(false)
+  const [editQueue, setEditQueue] = useState<string[]>([])
+
+  const isEditingPhoto = editQueue.length > 0
+  const busy = isCompressing || isEditingPhoto
 
   useEffect(() => {
     if (isOpen) {
@@ -49,18 +54,20 @@ export default function StoryModal({
         setPhotos([])
       }
       setIsCompressing(false)
+      setEditQueue([])
     }
   }, [isOpen, initialTitle, initialPhoto, initialPhotos])
 
   const handleClose = () => {
-    if (isCompressing) return
+    if (busy) return
     setTitle('')
     setPhotos([])
+    setEditQueue([])
     onClose()
   }
 
   const handleSave = () => {
-    if (isCompressing) return
+    if (busy) return
     if (!title.trim()) {
       console.warn('[StoryModal] 저장 불가 — 제목이 비어 있어요')
       return
@@ -94,7 +101,7 @@ export default function StoryModal({
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
-    if (!files || files.length === 0 || isCompressing) return
+    if (!files || files.length === 0 || busy) return
 
     const selectedFiles = Array.from(files)
     e.target.value = ''
@@ -124,19 +131,32 @@ export default function StoryModal({
       }
       if (compressedFiles.length === 0) return
 
-      const newPhotos = await Promise.all(
+      let newPhotos = await Promise.all(
         compressedFiles.map((file) => readFileAsDataUrl(file)),
       )
-      setPhotos((prev) =>
-        variant === 'room' ? newPhotos.slice(0, 1) : [...prev, ...newPhotos],
-      )
+      if (variant === 'room') {
+        newPhotos = newPhotos.slice(0, 1)
+      }
+      if (newPhotos.length === 0) return
+      setEditQueue((prev) => [...prev, ...newPhotos])
     } finally {
       setIsCompressing(false)
     }
   }
 
+  const handleCropConfirm = async (croppedDataUrl: string) => {
+    setPhotos((prev) =>
+      variant === 'room' ? [croppedDataUrl] : [...prev, croppedDataUrl],
+    )
+    setEditQueue((queue) => queue.slice(1))
+  }
+
+  const handleCropCancel = () => {
+    setEditQueue([])
+  }
+
   const removePhoto = (index: number) => {
-    if (isCompressing) return
+    if (busy) return
     setPhotos((prev) => prev.filter((_, i) => i !== index))
   }
 
@@ -195,7 +215,11 @@ export default function StoryModal({
           <p className="mt-1.5 text-xs text-neutral-500">{description}</p>
           {isCompressing ? (
             <p className="mt-2 text-xs font-medium text-stone-500">
-              사진을 압축하는 중이에요…
+              사진을 준비하는 중이에요…
+            </p>
+          ) : isEditingPhoto ? (
+            <p className="mt-2 text-xs font-medium text-stone-500">
+              사진 편집을 완료해 주세요…
             </p>
           ) : null}
         </div>
@@ -217,7 +241,7 @@ export default function StoryModal({
                 <button
                   type="button"
                   onClick={() => removePhoto(index)}
-                  disabled={isCompressing}
+                  disabled={busy}
                   className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black text-[10px] text-white shadow-sm disabled:opacity-40"
                   aria-label={`사진 ${index + 1} 삭제`}
                 >
@@ -229,7 +253,7 @@ export default function StoryModal({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isCompressing}
+                disabled={busy}
                 className="flex aspect-square flex-col items-center justify-center rounded-2xl border-0 bg-[#F7F6F3] transition hover:bg-[#EFEDE8] disabled:opacity-50"
               >
                 <svg
@@ -269,7 +293,7 @@ export default function StoryModal({
           placeholder={titlePlaceholder}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          disabled={isCompressing}
+          disabled={busy}
           autoFocus
         />
 
@@ -277,7 +301,7 @@ export default function StoryModal({
           <button
             type="button"
             onClick={handleClose}
-            disabled={isCompressing}
+            disabled={busy}
             className="flex-1 rounded-2xl border-0 bg-[#F7F6F3] py-3.5 text-sm font-semibold text-neutral-600 transition hover:bg-[#EFEDE8] disabled:opacity-40"
           >
             닫기
@@ -285,13 +309,29 @@ export default function StoryModal({
           <button
             type="button"
             onClick={handleSave}
-            disabled={!title.trim() || isCompressing}
+            disabled={!title.trim() || busy}
             className="flex-1 rounded-2xl bg-black py-3.5 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.16)] transition hover:bg-neutral-800 disabled:opacity-40"
           >
             {saveLabel}
           </button>
         </div>
       </div>
+
+      {editQueue[0] ? (
+        <ImageCropEditor
+          key={editQueue[0].slice(0, 64)}
+          imageSrc={editQueue[0]}
+          aspect={isRoom ? 1 : 4 / 5}
+          title="사진 편집"
+          queueLabel={
+            editQueue.length > 1
+              ? `남은 사진 ${editQueue.length}장`
+              : undefined
+          }
+          onCancel={handleCropCancel}
+          onConfirm={handleCropConfirm}
+        />
+      ) : null}
     </div>
   )
 }

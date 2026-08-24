@@ -15,6 +15,13 @@ import {
   updateStory,
 } from './services/storyService'
 import { resolveRemotePhotoUrls } from './services/storageService'
+import {
+  ensureFirebaseAuth,
+  formatFirebaseAuthError,
+  getFirebaseCurrentUser,
+  isValidFirebaseSession,
+  syncFirebaseAuthForAppUser,
+} from './services/firebase'
 import { useAuth } from './context/AuthContext'
 import { useRegisterBackHandler } from './context/AppsInTossNavigationContext'
 import { useToast } from './context/ToastContext'
@@ -732,6 +739,28 @@ export default function RoomDetail({
     const targetRoomId = resolveFirestoreRoomId(room.id)
     setIsSavingStory(true)
     try {
+      if (!user?.id || user.id.startsWith('temp-')) {
+        throw new Error('로그인이 필요해요. 앱을 다시 시작해 주세요.')
+      }
+
+      // 토스 세션 → Firebase Custom Token 세션이 있어야 Storage/Firestore 쓰기 가능
+      let firebaseUser = getFirebaseCurrentUser()
+      if (!isValidFirebaseSession(firebaseUser)) {
+        firebaseUser = await syncFirebaseAuthForAppUser(user)
+      }
+      firebaseUser = await ensureFirebaseAuth()
+
+      console.info('[RoomDetail] 저장 전 인증 상태', {
+        tossUserId: user.id,
+        firebaseUid: firebaseUser.uid,
+        isAnonymous: firebaseUser.isAnonymous,
+        hasPhotos: draftFields.photos.length > 0,
+      })
+
+      if (firebaseUser.isAnonymous) {
+        throw new Error('익명 Firebase 세션으로는 글을 등록할 수 없어요.')
+      }
+
       const photos = await resolveRemotePhotoUrls(
         draftFields.photos,
         targetRoomId,
@@ -878,7 +907,7 @@ export default function RoomDetail({
       console.error('[RoomDetail] 이야기 저장 실패', error)
       const message =
         error instanceof Error && error.message
-          ? error.message
+          ? formatFirebaseAuthError(error)
           : '저장에 실패했어요'
       showToast(message)
       throw error

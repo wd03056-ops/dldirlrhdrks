@@ -1,5 +1,6 @@
 import { Environment, TossAuth, User } from '@apps-in-toss/web-framework'
 import type { AuthUser } from '../types/auth'
+import { syncFirebaseAuthForAppUser } from './firebase'
 
 const AUTH_STORAGE_KEY = 'woori-auth-user-v5'
 
@@ -71,12 +72,6 @@ export function isInTossApp() {
   }
 }
 
-function createTempUserId() {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : String(Date.now())
-}
-
 /**
  * 콘솔에 등록한 동의 키로 실명(USER_NAME)을 가져와요.
  * @see https://developers-apps-in-toss.toss.im/documentation/common/user-info
@@ -111,7 +106,7 @@ async function resolveDisplayName(fallbackId: string, preferred?: string | null)
 async function exchangeAuthorizationCode(
   authorizationCode: string,
   referrer: 'DEFAULT' | 'SANDBOX',
-): Promise<AuthUser> {
+): Promise<{ user: AuthUser; firebaseCustomToken: string }> {
   const base = authApiBase()
   if (!base) {
     throw new Error(
@@ -133,7 +128,11 @@ async function exchangeAuthorizationCode(
   }
 
   const text = await response.text()
-  let payload: { user?: AuthUser; error?: string } = {}
+  let payload: {
+    user?: AuthUser
+    error?: string
+    firebaseCustomToken?: string
+  } = {}
   try {
     payload = text ? (JSON.parse(text) as typeof payload) : {}
   } catch {
@@ -144,9 +143,18 @@ async function exchangeAuthorizationCode(
     throw new Error(payload.error || '토스 로그인에 실패했어요.')
   }
 
+  if (!payload.firebaseCustomToken) {
+    throw new Error(
+      'Firebase 로그인 토큰이 없어요. 인증 서버의 Firebase 서비스 계정을 확인해 주세요.',
+    )
+  }
+
   const id = String(payload.user.id)
   const name = await resolveDisplayName(id, payload.user.name)
-  return { id, name, authMethod: 'toss-login' }
+  return {
+    user: { id, name, authMethod: 'toss-login' },
+    firebaseCustomToken: payload.firebaseCustomToken,
+  }
 }
 
 let tossLoginInFlight: Promise<AuthUser> | null = null
@@ -170,9 +178,13 @@ export async function loginWithToss(): Promise<AuthUser> {
       throw new Error('인가 코드를 받지 못했어요. 다시 로그인해 주세요.')
     }
 
-    const user = await exchangeAuthorizationCode(authorizationCode, referrer)
-    saveStoredUser(user)
-    return user
+    const exchanged = await exchangeAuthorizationCode(authorizationCode, referrer)
+    await syncFirebaseAuthForAppUser(
+      exchanged.user,
+      exchanged.firebaseCustomToken,
+    )
+    saveStoredUser(exchanged.user)
+    return exchanged.user
   })()
 
   const pending = tossLoginInFlight
@@ -218,6 +230,7 @@ export async function resolveAnonymousUser(): Promise<AuthUser> {
           name,
           authMethod: 'anonymous-key',
         }
+        await syncFirebaseAuthForAppUser(user)
         saveStoredUser(user)
         return user
       }
@@ -227,14 +240,9 @@ export async function resolveAnonymousUser(): Promise<AuthUser> {
     if (isInTossApp()) throw error
   }
 
-  const tempId = createTempUserId()
-  const user: AuthUser = {
-    id: `temp-${tempId}`,
-    name: await resolveDisplayName(tempId),
-    authMethod: 'anonymous-key',
-  }
-  saveStoredUser(user)
-  return user
+  throw new Error(
+    '유효한 토스 사용자 세션이 없어요. 토스 앱에서 다시 열어 주세요.',
+  )
 }
 
 /**
@@ -270,5 +278,11 @@ export async function loginForTestPhase(): Promise<AuthUser> {
 export async function restoreSession(): Promise<AuthUser | null> {
   const stored = loadStoredUser()
   if (!stored) return null
-  return refreshUserDisplayName(stored)
+  if (stored.id.startsWith('temp-')) {
+    clearStoredUser()
+    return null
+  }
+  const refreshed = await refreshUserDisplayName(stored)
+  await syncFirebaseAuthForAppUser(refreshed)
+  return refreshed
 }

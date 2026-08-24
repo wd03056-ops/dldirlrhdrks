@@ -15,6 +15,7 @@ import {
   type QueryConstraint,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore'
+import { ensureFirebaseAuth } from './firebase'
 import { storiesCollection, storyDocument } from './firestorePaths'
 import { resolveFirestoreRoomId } from '../utils/firestoreRoomId'
 import type {
@@ -437,6 +438,7 @@ export async function addStory(
   roomId: string | number,
   input: Omit<StoryCreateInput, 'roomId'> & { roomId?: string },
 ): Promise<string> {
+  await ensureFirebaseAuth()
   const id = resolveFirestoreRoomId(roomId)
 
   let slides =
@@ -521,6 +523,7 @@ export async function updateStory(
   storyId: string,
   input: StoryUpdateInput,
 ): Promise<void> {
+  await ensureFirebaseAuth()
   const id = resolveFirestoreRoomId(roomId)
   const next: Record<string, unknown> = {
     ...input,
@@ -575,6 +578,7 @@ export async function appendStorySlides(
   storyId: string,
   newSlides: StorySlideInput[],
 ): Promise<StorySlide[]> {
+  await ensureFirebaseAuth()
   const id = resolveFirestoreRoomId(roomId)
   const appended = toSafeSlides(newSlides, 'append')
   if (appended.length === 0) return []
@@ -615,6 +619,7 @@ export async function deleteStory(
   roomId: string | number,
   storyId: string,
 ): Promise<DeleteStoryResult> {
+  await ensureFirebaseAuth()
   const id = resolveFirestoreRoomId(roomId)
   const existing = await getStory(id, storyId)
 

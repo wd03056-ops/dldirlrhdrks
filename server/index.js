@@ -11,9 +11,15 @@ import {
   readOptionalFile,
 } from './loadEnv.js'
 import { fetchLoginMe, generateToken } from './tossClient.js'
+import {
+  createFirebaseCustomToken,
+  getFirebaseAdminStatus,
+  initFirebaseAdmin,
+} from './firebaseAdmin.js'
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 loadEnvFile(resolve(PROJECT_ROOT, '.env'))
+initFirebaseAdmin()
 
 const PORT = Number(process.env.PORT || process.env.AUTH_SERVER_PORT || 4000)
 
@@ -190,13 +196,70 @@ async function handleTossLogin(req, res) {
     })
   }
 
+  let firebaseCustomToken = null
+  let firebaseUid = null
+  try {
+    const minted = await createFirebaseCustomToken(String(profile.userKey), {
+      authMethod: 'toss-login',
+      name: displayName || undefined,
+    })
+    firebaseCustomToken = minted.token
+    firebaseUid = minted.uid
+  } catch (error) {
+    console.error('[auth-server] Firebase custom token 발급 실패', error)
+    sendJson(res, 503, {
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Firebase 로그인 토큰을 만들지 못했어요. 서비스 계정 설정을 확인해 주세요.',
+    })
+    return
+  }
+
   sendJson(res, 200, {
     user: {
       id: String(profile.userKey),
       name: displayName,
       userKey: profile.userKey,
     },
+    firebaseCustomToken,
+    firebaseUid,
   })
+}
+
+/**
+ * 앱 사용자(식별키 등)용 Firebase Custom Token 재발급
+ * — 세션 복원 시 Firebase Auth가 없을 때 클라이언트에서 호출
+ */
+async function handleFirebaseToken(req, res) {
+  const body = await readBody(req)
+  const userId = String(body.userId || body.uid || '').trim()
+  const authMethod = String(body.authMethod || 'anonymous-key').trim()
+  const name = String(body.name || '').trim()
+
+  if (!userId) {
+    sendJson(res, 400, { error: 'userId가 없어요.' })
+    return
+  }
+
+  try {
+    const minted = await createFirebaseCustomToken(userId, {
+      authMethod,
+      name: name || undefined,
+    })
+    sendJson(res, 200, {
+      firebaseCustomToken: minted.token,
+      firebaseUid: minted.uid,
+    })
+  } catch (error) {
+    console.error('[auth-server] firebase-token 실패', error)
+    sendJson(res, 503, {
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Firebase 로그인 토큰을 만들지 못했어요.',
+    })
+  }
 }
 
 async function handleUnlink(req, res) {
@@ -246,12 +309,18 @@ const server = createServer(async (req, res) => {
         decryptKeyBytes: keyBytes,
         aadLoaded: Boolean(aad),
         aadLength: aad.length,
+        firebaseAdmin: getFirebaseAdminStatus(),
       })
       return
     }
 
     if (req.method === 'POST' && url.pathname === '/api/auth/toss-login') {
       await handleTossLogin(req, res)
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/auth/firebase-token') {
+      await handleFirebaseToken(req, res)
       return
     }
 

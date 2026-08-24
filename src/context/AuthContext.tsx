@@ -12,6 +12,7 @@ import {
   restoreSession,
   startAppSession,
 } from '../services/tossAuth'
+import { signOutFirebase } from '../services/firebase'
 import type { AuthUser } from '../types/auth'
 
 type AuthContextValue = {
@@ -49,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        // 비게임 기본: 식별키로 바로 시작 (별도 로그인 화면 없음)
+        // 토스 로그인 또는 식별키 → Firebase Custom Token 동기화까지 포함
         const nextUser = await startAppSession()
         if (!cancelled) setUser(nextUser)
       } catch (bootError) {
@@ -91,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     clearStoredUser()
+    void signOutFirebase()
     setUser(null)
     setError(null)
   }, [])

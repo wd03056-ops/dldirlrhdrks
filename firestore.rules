@@ -1,0 +1,24 @@
+rules_version = '2';
+
+// `firebase deploy --only firestore:rules` 로 배포하세요.
+// 토스 로그인 → Custom Token → Firebase Auth 세션이 있어야 읽고/씁니다.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isLoggedIn() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    match /rooms/{roomId} {
+      allow read, write: if isLoggedIn();
+
+      match /{subcollection}/{docId} {
+        allow read, write: if isLoggedIn();
+      }
+
+      match /{subcollection}/{docId}/{document=**} {
+        allow read, write: if isLoggedIn();
+      }
+    }
+  }
+}

@@ -10,6 +10,7 @@ import {
   type DocumentSnapshot,
   type Unsubscribe,
 } from 'firebase/firestore'
+import { ensureFirebaseAuth } from './firebase'
 import { schedulesCollection, scheduleDocument } from './firestorePaths'
 import { resolveFirestoreRoomId } from '../utils/firestoreRoomId'
 import type {
@@ -99,6 +100,7 @@ export async function addSchedule(
   roomId: string | number,
   input: Omit<ScheduleCreateInput, 'roomId'> & { roomId?: string },
 ): Promise<string> {
+  await ensureFirebaseAuth()
   const id = resolveFirestoreRoomId(roomId)
   const payload = {
     roomId: id,
@@ -129,6 +131,7 @@ export async function updateSchedule(
   scheduleId: string,
   input: ScheduleUpdateInput,
 ): Promise<void> {
+  await ensureFirebaseAuth()
   const id = resolveFirestoreRoomId(roomId)
   console.log('[Firestore] updateSchedule', { roomId: id, scheduleId, input })
   await updateDoc(scheduleDocument(id, scheduleId), {
@@ -142,6 +145,7 @@ export async function deleteSchedule(
   roomId: string | number,
   scheduleId: string,
 ): Promise<void> {
+  await ensureFirebaseAuth()
   const id = resolveFirestoreRoomId(roomId)
   console.log('[Firestore] deleteSchedule', { roomId: id, scheduleId })
   await deleteDoc(scheduleDocument(id, scheduleId))
