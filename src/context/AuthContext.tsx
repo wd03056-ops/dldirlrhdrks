@@ -9,6 +9,8 @@ import {
 } from 'react'
 import {
   clearStoredUser,
+  isInTossApp,
+  loginWithToss,
   resolveAnonymousUser,
   restoreSession,
 } from '../services/tossAuth'
@@ -37,6 +39,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function boot() {
       try {
+        if (isInTossApp()) {
+          const nextUser = await loginWithToss()
+          if (!cancelled) setUser(nextUser)
+          return
+        }
+
         const restored = await restoreSession()
         if (cancelled) return
         if (restored) {
@@ -44,12 +52,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        // 비게임: 진입 시 식별키로 바로 시작 (별도 토스 로그인 화면 없음)
         const nextUser = await resolveAnonymousUser()
         if (!cancelled) setUser(nextUser)
       } catch {
         if (!cancelled) {
-          setError('사용자를 확인하지 못했어요. 다시 시도해 주세요.')
+          setError(
+            isInTossApp()
+              ? '토스 로그인을 완료해 주세요.'
+              : '사용자를 확인하지 못했어요. 다시 시도해 주세요.',
+          )
         }
       } finally {
         if (!cancelled) setIsInitializing(false)
@@ -66,7 +77,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoggingIn(true)
     setError(null)
     try {
-      const loggedInUser = await resolveAnonymousUser()
+      const loggedInUser = isInTossApp()
+        ? await loginWithToss()
+        : await resolveAnonymousUser()
       setUser(loggedInUser)
     } catch {
       setError('시작에 실패했어요. 다시 시도해 주세요.')

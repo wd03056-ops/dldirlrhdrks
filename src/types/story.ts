@@ -13,6 +13,8 @@ export interface StorySlide {
   authorId?: string
   authorName?: string
   createdAt?: number
+  /** create: 원글 슬라이드, append: 릴레이로 이어 쓴 글 */
+  origin?: 'create' | 'append'
 }
 
 /**

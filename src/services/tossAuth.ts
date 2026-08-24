@@ -1,7 +1,11 @@
-import { Environment, User } from '@apps-in-toss/web-framework'
+import { Environment, TossAuth, User } from '@apps-in-toss/web-framework'
 import type { AuthUser } from '../types/auth'
 
-const AUTH_STORAGE_KEY = 'woori-auth-user-v2'
+const AUTH_STORAGE_KEY = 'woori-auth-user-v3'
+
+function authApiBase() {
+  return (import.meta.env.VITE_TOSS_AUTH_API_URL || '').replace(/\/$/, '')
+}
 
 export function loadStoredUser(): AuthUser | null {
   try {
@@ -43,9 +47,38 @@ function createTempUserId() {
     : String(Date.now())
 }
 
+async function exchangeAuthorizationCode(
+  authorizationCode: string,
+  referrer: 'DEFAULT' | 'SANDBOX',
+): Promise<AuthUser> {
+  const response = await fetch(`${authApiBase()}/api/auth/toss-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ authorizationCode, referrer }),
+  })
+  const payload = (await response.json().catch(() => ({}))) as {
+    user?: AuthUser
+    error?: string
+  }
+  if (!response.ok || !payload.user?.id) {
+    throw new Error(payload.error || '토스 로그인에 실패했어요.')
+  }
+  return payload.user
+}
+
 /**
- * 비게임 식별키(getAnonymousKey)로 사용자 식별
- * @see https://developers-apps-in-toss.toss.im/documentation/common/authentication/hash-key
+ * 토스 로그인: 미니앱에서 인가 코드만 받은 뒤, 토큰 교환·복호화는 서버에서 처리해요.
+ * @see https://developers-apps-in-toss.toss.im/documentation/common/authentication/toss-login
+ */
+export async function loginWithToss(): Promise<AuthUser> {
+  const { authorizationCode, referrer } = await TossAuth.login()
+  const user = await exchangeAuthorizationCode(authorizationCode, referrer)
+  saveStoredUser(user)
+  return user
+}
+
+/**
+ * 브라우저 로컬 테스트용. 토스 앱에서는 사용하지 않아요.
  */
 export async function resolveAnonymousUser(): Promise<AuthUser> {
   try {
@@ -64,7 +97,6 @@ export async function resolveAnonymousUser(): Promise<AuthUser> {
     console.warn('[Auth] getAnonymousKey 실패', error)
   }
 
-  // 브라우저/미지원 환경 폴백 (로컬 테스트용)
   const tempId = createTempUserId()
   const user: AuthUser = {
     id: `temp-${tempId}`,
@@ -74,9 +106,9 @@ export async function resolveAnonymousUser(): Promise<AuthUser> {
   return user
 }
 
-/** @deprecated resolveAnonymousUser 사용 */
+/** @deprecated loginWithToss / resolveAnonymousUser 사용 */
 export async function loginForTestPhase(): Promise<AuthUser> {
-  return resolveAnonymousUser()
+  return isInTossApp() ? loginWithToss() : resolveAnonymousUser()
 }
 
 export async function restoreSession(): Promise<AuthUser | null> {

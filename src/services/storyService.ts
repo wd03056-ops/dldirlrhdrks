@@ -100,6 +100,10 @@ function normalizeSlide(
       typeof data.createdAt === 'number'
         ? data.createdAt
         : (fallback?.createdAt ?? Date.now()),
+    origin:
+      data.origin === 'append' || data.origin === 'create'
+        ? data.origin
+        : fallback?.origin,
   }
 }
 
@@ -191,7 +195,10 @@ function sortByCreatedAtDesc(list: Story[]) {
   })
 }
 
-function toSafeSlides(slides: StorySlideInput[]): StorySlide[] {
+function toSafeSlides(
+  slides: StorySlideInput[],
+  defaultOrigin: 'create' | 'append' = 'create',
+): StorySlide[] {
   return slides.map((slide, index) => {
     const next: StorySlide = {
       id: slide.id ?? createSlideId(),
@@ -200,11 +207,22 @@ function toSafeSlides(slides: StorySlideInput[]): StorySlide[] {
       authorId: slide.authorId,
       authorName: slide.authorName,
       createdAt: slide.createdAt ?? Date.now() + index,
+      origin: slide.origin ?? defaultOrigin,
     }
     const title = slide.title?.trim()
     if (title) next.title = title
     return next
   })
+}
+
+function isAppendedSlide(story: Pick<Story, 'authorId'>, slide: StorySlide) {
+  if (slide.origin === 'append') return true
+  if (slide.origin === 'create') return false
+  if (slide.title?.trim()) return true
+  if (slide.authorId && story.authorId && slide.authorId !== story.authorId) {
+    return true
+  }
+  return false
 }
 
 function getCachedRoom(roomId: string): StoriesRoomCache | null {
@@ -423,14 +441,16 @@ export async function addStory(
 
   let slides =
     input.slides && input.slides.length > 0
-      ? toSafeSlides(input.slides)
+      ? toSafeSlides(input.slides, 'create')
       : toSafeSlides(
           (input.photos ?? []).map((url, index) => ({
             url,
             text: index === 0 ? (input.content ?? '') : '',
             authorId: input.authorId,
             authorName: input.authorName,
+            origin: 'create' as const,
           })),
+          'create',
         )
 
   if (slides.length === 0 && (input.content || input.coverPhoto)) {
@@ -556,7 +576,7 @@ export async function appendStorySlides(
   newSlides: StorySlideInput[],
 ): Promise<StorySlide[]> {
   const id = resolveFirestoreRoomId(roomId)
-  const appended = toSafeSlides(newSlides)
+  const appended = toSafeSlides(newSlides, 'append')
   if (appended.length === 0) return []
 
   const photoUrls = appended
@@ -582,15 +602,66 @@ export async function appendStorySlides(
   return appended
 }
 
-/** rooms/{roomId}/stories/{storyId} 삭제 */
+export type DeleteStoryResult =
+  | { keptAppended: false }
+  | { keptAppended: true; story: Story }
+
+/**
+ * 원글 삭제
+ * - 이어 쓴 슬라이드가 있으면 원글만 제거하고 문서는 유지
+ * - 이어 쓴 글이 없으면 문서 삭제
+ */
 export async function deleteStory(
   roomId: string | number,
   storyId: string,
-): Promise<void> {
+): Promise<DeleteStoryResult> {
   const id = resolveFirestoreRoomId(roomId)
-  console.log('[Firestore] deleteStory', { roomId: id, storyId })
-  await deleteDoc(storyDocument(id, storyId))
-  removeCachedStory(id, storyId)
+  const existing = await getStory(id, storyId)
+
+  const remaining = (existing?.slides ?? []).filter((slide) =>
+    existing ? isAppendedSlide(existing, slide) : false,
+  )
+
+  if (!existing || remaining.length === 0) {
+    console.log('[Firestore] deleteStory', { roomId: id, storyId })
+    await deleteDoc(storyDocument(id, storyId))
+    removeCachedStory(id, storyId)
+    return { keptAppended: false }
+  }
+
+  const first = remaining[0]
+  const photos = remaining
+    .map((slide) => slide.url)
+    .filter((url): url is string => Boolean(url))
+  const nextStory: Story = {
+    ...existing,
+    title: first.title?.trim() || '',
+    content: first.text ?? '',
+    slides: remaining,
+    photos,
+    coverPhoto: photos[0] ?? null,
+    authorId: first.authorId,
+    authorName: first.authorName,
+  }
+
+  console.log('[Firestore] deleteStory keep appended', {
+    roomId: id,
+    storyId,
+    remaining: remaining.length,
+  })
+
+  await updateDoc(storyDocument(id, storyId), {
+    title: nextStory.title,
+    content: nextStory.content,
+    slides: remaining,
+    photos,
+    coverPhoto: nextStory.coverPhoto,
+    authorId: nextStory.authorId ?? null,
+    authorName: nextStory.authorName ?? null,
+    updatedAt: serverTimestamp(),
+  })
+  upsertCachedStory(id, nextStory)
+  return { keptAppended: true, story: nextStory }
 }
 
 /**

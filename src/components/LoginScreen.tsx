@@ -1,7 +1,9 @@
 import { useAuth } from '../context/AuthContext'
+import { isInTossApp } from '../services/tossAuth'
 
 export default function LoginScreen() {
   const { login, isLoggingIn, error } = useAuth()
+  const inToss = isInTossApp()
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-white px-6 font-sans text-black">
@@ -25,7 +27,11 @@ export default function LoginScreen() {
           disabled={isLoggingIn}
           className="flex h-14 w-full max-w-xs items-center justify-center gap-2 rounded-2xl bg-black text-[15px] font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition hover:bg-neutral-800 disabled:opacity-50"
         >
-          {isLoggingIn ? '시작하는 중...' : '시작하기'}
+          {isLoggingIn
+            ? '로그인 중...'
+            : inToss
+              ? '토스로 시작하기'
+              : '시작하기'}
         </button>
 
         {error ? (

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:auth": "node server/index.js",
     "build": "tsc -b && vite build && ait build",
     "lint": "oxlint",
     "preview": "vite preview",

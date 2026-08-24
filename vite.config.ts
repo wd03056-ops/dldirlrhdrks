@@ -5,4 +5,10 @@ import aitDevtools from '@apps-in-toss/devtools/unplugin'
 
 export default defineConfig({
   plugins: [aitDevtools.vite(), react(), tailwindcss()],
+  server: {
+    proxy: {
+      '/api': 'http://localhost:4000',
+      '/health': 'http://localhost:4000',
+    },
+  },
 })

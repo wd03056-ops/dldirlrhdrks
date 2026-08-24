@@ -15,6 +15,16 @@ dist-ssr
 .env.*
 !.env.example
 
+# Toss login secrets (AES decrypt key, AAD, mTLS). Never commit anything under secrets/.
+/secrets/
+
+# Extra guard: never commit private keys / cert material anywhere
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

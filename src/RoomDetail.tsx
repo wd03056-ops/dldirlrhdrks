@@ -17,6 +17,7 @@ import {
 import { useAuth } from './context/AuthContext'
 import { useRegisterBackHandler } from './context/AppsInTossNavigationContext'
 import { useToast } from './context/ToastContext'
+import { isInTossApp } from './services/tossAuth'
 import {
   getUnreadScheduleNotifications,
   markRoomScheduleNotificationsRead,
@@ -419,22 +420,26 @@ function StoryFeedView({
 
 function EmptyGuide({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="mt-10 flex flex-1 flex-col items-center justify-center px-4 text-center">
-      <p className="text-[15px] font-semibold text-black">
-        첫 글을 작성해보세요!
-      </p>
-      <p className="mt-2 text-xs leading-relaxed text-neutral-400">
-        하단 <span className="font-semibold text-black">+</span> 버튼을 눌러
-        <br />
-        사진과 글을 남겨 보세요.
-      </p>
-      <button
-        type="button"
-        onClick={onAdd}
-        className="mt-5 rounded-full bg-black px-5 py-2.5 text-xs font-semibold text-white shadow-[0_8px_20px_rgba(0,0,0,0.14)]"
-      >
-        + 글 작성
-      </button>
+    <div className="absolute inset-0 z-0 flex items-center justify-center px-8">
+      <div className="flex max-w-[240px] flex-col items-center text-center">
+        <p className="text-[22px] font-bold leading-snug tracking-tight text-black">
+          첫 글을
+          <br />
+          작성해보세요
+        </p>
+        <p className="mt-4 text-[13px] leading-[1.7] text-neutral-400">
+          사진과 글로
+          <br />
+          오늘의 이야기를 남겨 보세요.
+        </p>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="mt-8 rounded-full bg-black px-7 py-3 text-[13px] font-semibold tracking-wide text-white shadow-[0_10px_24px_rgba(0,0,0,0.12)] transition active:scale-[0.98]"
+        >
+          글 작성
+        </button>
+      </div>
     </div>
   )
 }
@@ -728,6 +733,7 @@ export default function RoomDetail({
                 url,
                 title: title || undefined,
                 text: content,
+                origin: 'append' as const,
                 authorId: user?.id,
                 authorName: user?.name,
               }))
@@ -736,6 +742,7 @@ export default function RoomDetail({
                   url: null as string | null,
                   title: title || undefined,
                   text: content,
+                  origin: 'append' as const,
                   authorId: user?.id,
                   authorName: user?.name,
                 },
@@ -764,6 +771,8 @@ export default function RoomDetail({
             ? photos.map((url, index) => ({
                 id: target.slides[index]?.id,
                 url,
+                origin: target.slides[index]?.origin,
+                title: target.slides[index]?.title,
                 text:
                   index === 0
                     ? content
@@ -794,6 +803,8 @@ export default function RoomDetail({
             id: slide.id ?? `edit-${index}`,
             url: slide.url ?? null,
             text: slide.text ?? '',
+            title: slide.title,
+            origin: slide.origin ?? target.slides[index]?.origin,
             authorId: slide.authorId,
             authorName: slide.authorName,
             createdAt: Date.now() + index,
@@ -859,12 +870,21 @@ export default function RoomDetail({
   const handleDeleteStory = async (storyId: string) => {
     const targetRoomId = resolveFirestoreRoomId(room.id)
     try {
-      await deleteStory(targetRoomId, storyId)
-      setStories((prev) => prev.filter((story) => story.id !== storyId))
+      const result = await deleteStory(targetRoomId, storyId)
+      if (result.keptAppended) {
+        setStories((prev) =>
+          prev.map((story) =>
+            story.id === storyId ? result.story : story,
+          ),
+        )
+        showToast('원글을 삭제했어요. 이어 쓴 글은 그대로 남아요')
+      } else {
+        setStories((prev) => prev.filter((story) => story.id !== storyId))
+        showToast('이야기를 삭제했어요')
+      }
       setIsWriteOpen(false)
       setEditingStory(null)
       setDeletingStory(null)
-      showToast('이야기를 삭제했어요')
     } catch (error) {
       console.error('[RoomDetail] 이야기 삭제 실패', error)
       showToast('삭제에 실패했어요')
@@ -872,6 +892,8 @@ export default function RoomDetail({
   }
 
   if (!user) return null
+
+  const showInAppBack = !isInTossApp()
 
   if (isWriteOpen) {
     const editPhotos =
@@ -920,27 +942,47 @@ export default function RoomDetail({
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-white px-6 font-sans text-black">
-      <div className="relative mt-4 mb-1 flex items-center justify-center px-16">
-        <h1 className="min-w-0 truncate text-center font-bold text-black">
+    <div className="relative mx-auto flex min-h-dvh max-w-md flex-col bg-white px-6 font-sans text-black">
+      <div className="relative z-10 mt-[3cm] mb-4 flex items-center justify-between gap-2">
+        {showInAppBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="relative z-10 flex shrink-0 items-center gap-1 text-sm font-medium text-black"
+          >
+            ← 뒤로
+          </button>
+        ) : (
+          <span className="w-8 shrink-0" aria-hidden />
+        )}
+        <h1 className="pointer-events-none absolute inset-x-0 truncate px-16 text-center text-2xl font-bold tracking-tight text-black">
           {room.title}
         </h1>
-        <button
-          type="button"
-          onClick={() => setIsMembersOpen(true)}
-          className="absolute right-0 shrink-0 text-xs text-neutral-400 underline-offset-2 hover:text-black hover:underline"
-        >
-          구성원 {room.members}명
-        </button>
+        {displayMemories.length > 0 ? (
+          <button
+            type="button"
+            onClick={openStoryCreate}
+            className="relative z-10 ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-black transition hover:bg-stone-100"
+            aria-label="새 글 작성"
+          >
+            <svg
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+        ) : (
+          <span className="h-9 w-9 shrink-0" aria-hidden />
+        )}
       </div>
 
-      <p className="mb-4 text-center text-[11px] text-neutral-400">
-        모임
-        <span className="mx-1.5 text-neutral-300">·</span>
-        이야기
-      </p>
-
-      <div className="flex flex-col justify-start pb-24">
+      <div className="flex min-h-0 flex-1 flex-col justify-start pb-10">
         {isStoriesLoading ? (
           <p className="mt-8 text-center text-xs text-neutral-400">
             이야기를 불러오는 중…
@@ -969,27 +1011,6 @@ export default function RoomDetail({
         )}
       </div>
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 mx-auto flex max-w-md justify-center px-6">
-        <button
-          type="button"
-          onClick={openStoryCreate}
-          className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full bg-black text-white shadow-[0_8px_24px_rgba(0,0,0,0.2)] transition active:scale-95"
-          aria-label="이야기 추가"
-        >
-          <svg
-            className="h-7 w-7"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            aria-hidden
-          >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
-      </div>
-
       <MembersModal
         isOpen={isMembersOpen}
         roomTitle={room.title}
@@ -1015,7 +1036,9 @@ export default function RoomDetail({
       {deletingStory ? (
         <ConfirmOverlay
           title="이야기 삭제"
-          description={'이 이야기를 삭제할까요?\n삭제하면 되돌릴 수 없어요.'}
+          description={
+            '원글만 삭제돼요.\n이어서 작성된 글은 그대로 남아요.'
+          }
           confirmLabel="삭제"
           cancelLabel="닫기"
           confirmClassName="bg-[#B85C5C] text-white"
