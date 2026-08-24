@@ -1,0 +1,28 @@
+# Render: 토스 로그인 인증 API만 배포합니다.
+# 미니앱 프론트는 ait build / ait deploy 로 올립니다.
+services:
+  - type: web
+    name: woori-toss-auth
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: .
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TOSS_API_BASE_URL
+        value: https://apps-in-toss-api.toss.im
+      - key: AUTH_CORS_ORIGINS
+        value: https://woori-secret-space.web.tossmini.com,https://woori-secret-space.private-web.tossmini.com,https://woori-secret-space.apps.tossmini.com,https://woori-secret-space.private-apps.tossmini.com
+      # 아래는 Render Dashboard → Environment 에서 Secret으로 넣으세요
+      - key: TOSS_DECRYPT_KEY
+        sync: false
+      - key: TOSS_AAD
+        sync: false
+      - key: TOSS_MTLS_CERT
+        sync: false
+      - key: TOSS_MTLS_KEY
+        sync: false

@@ -13,31 +13,75 @@ function resolveSecretPath(filePath) {
   return resolve(PROJECT_ROOT, filePath)
 }
 
-/**
- * 토스 파트너 API용 mTLS Agent.
- * cert = 공개 인증서(.crt), key = private key(.key)
- */
-export function createMtlsAgent() {
-  const certPath = resolveSecretPath(
-    process.env.TOSS_MTLS_CERT_FILE || DEFAULT_CERT,
-  )
-  const keyPath = resolveSecretPath(
-    process.env.TOSS_MTLS_KEY_FILE || DEFAULT_KEY,
-  )
+/** Render 등에서는 PEM을 환경변수로 넣어요. \n 이스케이프도 허용합니다. */
+function readPemFromEnv(raw) {
+  if (!raw) return null
+  const pem = String(raw).replace(/\\n/g, '\n').trim()
+  if (!pem.includes('BEGIN')) return null
+  return Buffer.from(pem, 'utf8')
+}
 
-  if (!existsSync(certPath) || !existsSync(keyPath)) {
+function readPemFromBase64(raw) {
+  if (!raw) return null
+  try {
+    const decoded = Buffer.from(String(raw).replace(/\s+/g, ''), 'base64')
+    if (!decoded.toString('utf8').includes('BEGIN')) return null
+    return decoded
+  } catch {
+    return null
+  }
+}
+
+function loadMtlsMaterial() {
+  const cert =
+    readPemFromEnv(process.env.TOSS_MTLS_CERT) ||
+    readPemFromBase64(process.env.TOSS_MTLS_CERT_BASE64) ||
+    (() => {
+      const path = resolveSecretPath(
+        process.env.TOSS_MTLS_CERT_FILE || DEFAULT_CERT,
+      )
+      return existsSync(path) ? readFileSync(path) : null
+    })()
+
+  const key =
+    readPemFromEnv(process.env.TOSS_MTLS_KEY) ||
+    readPemFromBase64(process.env.TOSS_MTLS_KEY_BASE64) ||
+    (() => {
+      const path = resolveSecretPath(
+        process.env.TOSS_MTLS_KEY_FILE || DEFAULT_KEY,
+      )
+      return existsSync(path) ? readFileSync(path) : null
+    })()
+
+  if (!cert || !key) {
     throw new Error(
-      `mTLS 파일을 찾을 수 없어요.\ncert: ${certPath}\nkey: ${keyPath}`,
+      'mTLS 인증서가 없어요. Render에서는 TOSS_MTLS_CERT / TOSS_MTLS_KEY (PEM) 환경변수를 설정하세요.',
     )
   }
 
-  const caFile = process.env.TOSS_MTLS_CA_FILE
-  const caPath = caFile ? resolveSecretPath(caFile) : ''
+  let ca =
+    readPemFromEnv(process.env.TOSS_MTLS_CA) ||
+    readPemFromBase64(process.env.TOSS_MTLS_CA_BASE64) ||
+    null
+  if (!ca && process.env.TOSS_MTLS_CA_FILE) {
+    const caPath = resolveSecretPath(process.env.TOSS_MTLS_CA_FILE)
+    ca = existsSync(caPath) ? readFileSync(caPath) : null
+  }
 
+  return { cert, key, ca: ca || undefined }
+}
+
+/**
+ * 토스 파트너 API용 mTLS Agent.
+ * - 로컬: secrets/mtls/client.crt, client.key
+ * - Render: TOSS_MTLS_CERT, TOSS_MTLS_KEY 환경변수
+ */
+export function createMtlsAgent() {
+  const { cert, key, ca } = loadMtlsMaterial()
   return new https.Agent({
-    cert: readFileSync(certPath),
-    key: readFileSync(keyPath),
-    ca: caPath && existsSync(caPath) ? readFileSync(caPath) : undefined,
+    cert,
+    key,
+    ca,
     keepAlive: true,
   })
 }

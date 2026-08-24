@@ -15,7 +15,7 @@ import { fetchLoginMe, generateToken } from './tossClient.js'
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 loadEnvFile(resolve(PROJECT_ROOT, '.env'))
 
-const PORT = Number(process.env.AUTH_SERVER_PORT || 4000)
+const PORT = Number(process.env.PORT || process.env.AUTH_SERVER_PORT || 4000)
 
 function resolveProjectPath(filePath) {
   if (!filePath) return ''
@@ -272,7 +272,8 @@ const server = createServer(async (req, res) => {
   }
 })
 
-server.listen(PORT, () => {
+// Render는 0.0.0.0:$PORT 로 바인딩해야 헬스체크/외부 요청이 통과합니다.
+server.listen(PORT, '0.0.0.0', () => {
   const { key, aad } = loadDecryptSecrets()
   let keyBytes = 0
   try {
@@ -280,7 +281,7 @@ server.listen(PORT, () => {
   } catch {
     keyBytes = -1
   }
-  console.info(`Toss auth server listening on http://localhost:${PORT}`)
+  console.info(`Toss auth server listening on 0.0.0.0:${PORT}`)
   console.info(
     `decrypt key: ${key ? `loaded (${keyBytes} bytes)` : 'missing'}, aad: ${aad ? `loaded (len ${aad.length})` : 'missing'}`,
   )
