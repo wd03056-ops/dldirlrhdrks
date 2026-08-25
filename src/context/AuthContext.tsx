@@ -43,16 +43,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function boot() {
       try {
+        // 검수: 인트로 없이 즉시 토스 로그인 유도 금지
+        // → 부팅 시에는 저장된 세션만 복원하고, 로그인은 인트로 CTA에서만 시작
         const restored = await restoreSession()
         if (cancelled) return
-        if (restored) {
-          setUser(restored)
-          return
-        }
-
-        // 토스 로그인 또는 식별키 → Firebase Custom Token 동기화까지 포함
-        const nextUser = await startAppSession()
-        if (!cancelled) setUser(nextUser)
+        if (restored) setUser(restored)
       } catch (bootError) {
         console.error('[Auth] boot 실패', bootError)
         if (!cancelled) {
