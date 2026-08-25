@@ -34,6 +34,14 @@ import {
   isRoomMember,
   leaveRoom,
 } from './utils/roomMembers'
+import {
+  createRoomInFirestore,
+  findRoomBySlugInFirestore,
+  joinRoomInFirestore,
+  leaveRoomInFirestore,
+  updateRoomMetaInFirestore,
+  withLiveMembers,
+} from './services/roomService'
 
 type Tab = 'home' | 'profile'
 
@@ -186,8 +194,29 @@ export default function AppHome() {
   )
 
   const enterRoomFromSlug = useCallback(
-    (slug: string, options?: { replace?: boolean; silent?: boolean }) => {
-      const room = findRoomBySlug(rooms, slug)
+    async (slug: string, options?: { replace?: boolean; silent?: boolean }) => {
+      let room = findRoomBySlug(rooms, slug)
+
+      if (!room) {
+        try {
+          const remote = await findRoomBySlugInFirestore(slug)
+          if (remote) {
+            room = withRoomSlug({
+              id: remote.id,
+              title: remote.title,
+              slug: remote.slug,
+              members: remote.members,
+              memberList: remote.memberList,
+              lastPhoto: null,
+              coverPhoto: remote.coverPhoto,
+              inviteMsg: remote.inviteMsg,
+            })
+          }
+        } catch (error) {
+          console.error('[AppHome] Firestore slug 조회 실패', error)
+        }
+      }
+
       if (!room) {
         if (!options?.silent) {
           showToast('방을 찾을 수 없어요.')
@@ -197,7 +226,19 @@ export default function AppHome() {
         return false
       }
 
-      const joinedRoom = user ? joinRoomWithUser(room, user) : room
+      let joinedRoom = user ? joinRoomWithUser(room, user) : room
+      if (user) {
+        try {
+          const members = await joinRoomInFirestore({
+            roomId: room.id,
+            user: { id: user.id, name: user.name },
+          })
+          joinedRoom = withLiveMembers(joinedRoom, members)
+        } catch (error) {
+          console.error('[AppHome] Firestore 참여 실패', error)
+        }
+      }
+
       const nextRooms = persistRooms(upsertRoom(rooms, joinedRoom))
       const latestRoom =
         nextRooms.find((item) => item.id === joinedRoom.id) ?? joinedRoom
@@ -211,7 +252,7 @@ export default function AppHome() {
   useEffect(() => {
     const slug = getRoomSlugFromLocation()
     if (slug) {
-      enterRoomFromSlug(slug, { replace: true, silent: true })
+      void enterRoomFromSlug(slug, { replace: true, silent: true })
     }
   }, [])
 
@@ -223,7 +264,7 @@ export default function AppHome() {
         return
       }
 
-      enterRoomFromSlug(slug, { replace: true, silent: true })
+      void enterRoomFromSlug(slug, { replace: true, silent: true })
     }
 
     window.addEventListener('popstate', handlePopState)
@@ -274,7 +315,7 @@ export default function AppHome() {
     ? rooms.filter((room) => isRoomMember(room, user))
     : []
 
-  const handleLeaveRoom = (room: Room) => {
+  const handleLeaveRoom = async (room: Room) => {
     if (!user) return
 
     const confirmed = window.confirm(
@@ -282,10 +323,23 @@ export default function AppHome() {
     )
     if (!confirmed) return
 
-    const nextRoom = leaveRoom(room, user)
-    persistRooms(
-      rooms.map((item) => (item.id === room.id ? nextRoom : item)),
-    )
+    try {
+      const members = await leaveRoomInFirestore({
+        roomId: room.id,
+        userId: user.id,
+      })
+      const nextRoom = withLiveMembers(leaveRoom(room, user), members)
+      persistRooms(
+        rooms.map((item) => (item.id === room.id ? nextRoom : item)),
+      )
+    } catch (error) {
+      console.error('[AppHome] Firestore 나가기 실패', error)
+      const nextRoom = leaveRoom(room, user)
+      persistRooms(
+        rooms.map((item) => (item.id === room.id ? nextRoom : item)),
+      )
+    }
+
     showToast('모임에서 나갔어요. 모임은 그대로 유지돼요.')
 
     setSelectedRoomId(null)
@@ -293,17 +347,32 @@ export default function AppHome() {
     setIsLeaveMode(false)
   }
 
-  const handleComplete = (room: { name: string; inviteMsg: string }) => {
+  const handleComplete = async (room: { name: string }) => {
+    if (!user) {
+      showToast('로그인 후 모임을 만들 수 있어요.')
+      return
+    }
+
     const roomId = Date.now()
     const newRoom: Room = withRoomSlug({
       id: roomId,
       title: room.name,
       members: 1,
-      memberList: [createRoomMember({ id: user?.id ?? 'local', name: user?.name ?? '나' })],
+      memberList: [createRoomMember({ id: user.id, name: user.name })],
       lastPhoto: null,
       coverPhoto: null,
-      inviteMsg: room.inviteMsg,
     })
+
+    try {
+      await createRoomInFirestore({
+        room: newRoom,
+        user: { id: user.id, name: user.name },
+      })
+    } catch (error) {
+      console.error('[AppHome] Firestore 방 생성 실패', error)
+      showToast('모임 클라우드 저장에 실패했어요. 다시 시도해 주세요.')
+      return
+    }
 
     persistRooms([newRoom, ...rooms])
     setIsModalOpen(false)
@@ -324,7 +393,18 @@ export default function AppHome() {
             setSelectedRoomId(null)
             replaceRoomLocation(null)
           }}
-          onLeaveRoom={() => handleLeaveRoom(currentRoom)}
+          onLeaveRoom={() => {
+            void handleLeaveRoom(currentRoom)
+          }}
+          onMembersChange={(members) => {
+            persistRooms(
+              rooms.map((item) =>
+                item.id === currentRoom.id
+                  ? withLiveMembers(item, members)
+                  : item,
+              ),
+            )
+          }}
         />
         <OnboardingGuide isOpen={isOnboardingOpen} onClose={closeOnboarding} />
       </>
@@ -342,7 +422,7 @@ export default function AppHome() {
                   안녕하세요, {user?.name}님
                 </p>
                 <h1 className="mb-1 text-xl font-bold text-black">
-                  우리들의 공간
+                  우리들만의 공간
                 </h1>
               </div>
               <button
@@ -413,7 +493,9 @@ export default function AppHome() {
                         setEditingRoom(room)
                         setIsRoomEditOpen(true)
                       }}
-                      onLeave={() => handleLeaveRoom(room)}
+                      onLeave={() => {
+                        void handleLeaveRoom(room)
+                      }}
                     />
                   ))}
                 </div>
@@ -513,20 +595,25 @@ export default function AppHome() {
         }}
         onSave={({ title, lastPhoto }) => {
           if (!editingRoom) return
+          const nextRoom = withRoomSlug({
+            ...editingRoom,
+            title,
+            lastPhoto: null,
+            coverPhoto: lastPhoto,
+            slug: editingRoom.slug,
+          })
           persistRooms(
             rooms.map((room) =>
-              room.id === editingRoom.id
-                ? withRoomSlug({
-                    ...room,
-                    title,
-                    lastPhoto: null,
-                    coverPhoto: lastPhoto,
-                    // 방 주소(ID)는 제목 수정과 무관하게 유지
-                    slug: room.slug,
-                  })
-                : room,
+              room.id === editingRoom.id ? nextRoom : room,
             ),
           )
+          void updateRoomMetaInFirestore({
+            roomId: editingRoom.id,
+            title,
+            coverPhoto: lastPhoto,
+          }).catch((error) => {
+            console.error('[AppHome] Firestore 방 수정 실패', error)
+          })
           setIsRoomEditOpen(false)
           setEditingRoom(null)
           showToast('모임이 수정되었어요.')

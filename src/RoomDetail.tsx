@@ -16,6 +16,12 @@ import {
 } from './services/storyService'
 import { resolveRemotePhotoUrls } from './services/storageService'
 import {
+  createRoomInFirestore,
+  getRoomMeta,
+  joinRoomInFirestore,
+  subscribeRoomMembers,
+} from './services/roomService'
+import {
   ensureFirebaseAuth,
   formatFirebaseAuthError,
   getFirebaseCurrentUser,
@@ -42,6 +48,7 @@ type RoomDetailProps = {
   room: Room
   onBack: () => void
   onLeaveRoom: () => void
+  onMembersChange?: (members: Room['memberList']) => void
 }
 
 function formatStoryDate(date?: string) {
@@ -521,10 +528,15 @@ export default function RoomDetail({
   room,
   onBack,
   onLeaveRoom,
+  onMembersChange,
 }: RoomDetailProps) {
   const { user } = useAuth()
   const { showToast } = useToast()
-  const members = room.memberList
+  const [liveMembers, setLiveMembers] = useState<Room['memberList']>(
+    room.memberList,
+  )
+  const members = liveMembers
+  const memberCount = members.length
   const firestoreRoomId = resolveFirestoreRoomId(room.id)
   const [isMembersOpen, setIsMembersOpen] = useState(false)
   const [isWriteOpen, setIsWriteOpen] = useState(false)
@@ -545,6 +557,69 @@ export default function RoomDetail({
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
 
   const displayMemories = storiesToDisplayMemories(stories)
+
+  const onMembersChangeRef = useRef(onMembersChange)
+  onMembersChangeRef.current = onMembersChange
+
+  // Firestore 멤버 실시간 구독 + 현재 유저 참여 보장
+  useEffect(() => {
+    let cancelled = false
+    setLiveMembers(room.memberList)
+
+    const unsubscribe = subscribeRoomMembers(
+      firestoreRoomId,
+      (nextMembers) => {
+        if (cancelled) return
+        setLiveMembers(nextMembers)
+        onMembersChangeRef.current?.(nextMembers)
+      },
+      (error) => {
+        console.error('[RoomDetail] 구성원 구독 실패', error)
+      },
+    )
+
+    void (async () => {
+      if (!user?.id || user.id.startsWith('temp-')) return
+      try {
+        if (!isValidFirebaseSession(getFirebaseCurrentUser())) {
+          await syncFirebaseAuthForAppUser(user)
+        } else {
+          await ensureFirebaseAuth()
+        }
+
+        const meta = await getRoomMeta(firestoreRoomId)
+        if (!meta) {
+          await createRoomInFirestore({
+            room: {
+              ...room,
+              id: Number.parseInt(firestoreRoomId, 10) || room.id,
+            },
+            user: { id: user.id, name: user.name },
+          })
+        } else {
+          await joinRoomInFirestore({
+            roomId: firestoreRoomId,
+            user: { id: user.id, name: user.name },
+          })
+        }
+      } catch (error) {
+        console.error('[RoomDetail] 멤버 동기화 실패', error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [
+    firestoreRoomId,
+    room.id,
+    room.slug,
+    room.title,
+    room.coverPhoto,
+    room.inviteMsg,
+    user,
+  ])
 
   useRegisterBackHandler(() => {
     if (isWriteOpen) {
@@ -1006,9 +1081,26 @@ export default function RoomDetail({
         ) : (
           <span className="w-8 shrink-0" aria-hidden />
         )}
-        <h1 className="pointer-events-none absolute inset-x-0 truncate px-16 text-center text-2xl font-bold tracking-tight text-black">
-          {room.title}
-        </h1>
+        <div className="pointer-events-none absolute inset-x-0 flex items-baseline justify-center gap-2 px-16">
+          {/* 오른쪽 '구성원 N'과 같은 폭으로 왼쪽을 맞춰 제목만 화면 중앙에 오게 함 */}
+          <span
+            className="invisible shrink-0 text-xs font-medium"
+            aria-hidden
+          >
+            구성원 {memberCount}
+          </span>
+          <h1 className="truncate text-center text-2xl font-bold tracking-tight text-black">
+            {room.title}
+          </h1>
+          <button
+            type="button"
+            onClick={() => setIsMembersOpen(true)}
+            className="pointer-events-auto shrink-0 text-xs font-medium text-neutral-500 transition hover:text-neutral-700"
+            aria-label={`구성원 ${memberCount}명`}
+          >
+            구성원 {memberCount}
+          </button>
+        </div>
         {displayMemories.length > 0 ? (
           <button
             type="button"

@@ -36,7 +36,7 @@ export default function MembersModal({
         <div>
           <h2 className="text-lg font-bold tracking-tight text-black">구성원</h2>
           <p className="mt-1.5 text-xs text-neutral-500">
-            {roomTitle} · {members.length}명 · 모두 동등한 멤버예요
+            {roomTitle} · {members.length}명
           </p>
         </div>
 

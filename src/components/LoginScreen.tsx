@@ -7,7 +7,7 @@ export default function LoginScreen() {
     <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-white px-6 font-sans text-black">
       <div className="flex flex-1 flex-col items-center justify-center pb-24 text-center">
         <p className="mb-2 text-xs font-semibold tracking-wider text-neutral-400 uppercase">
-          우리들의 공간
+          우리들만의 공간
         </p>
         <h1 className="mb-3 text-2xl font-bold tracking-tight">
           소중한 추억을

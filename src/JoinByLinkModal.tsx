@@ -4,7 +4,7 @@ import { getRoomSlugFromLocation } from './utils/roomLinks'
 type JoinByLinkModalProps = {
   isOpen: boolean
   onClose: () => void
-  onJoin: (slug: string) => boolean
+  onJoin: (slug: string) => boolean | Promise<boolean>
 }
 
 function extractRoomSlug(input: string) {
@@ -51,14 +51,14 @@ export default function JoinByLinkModal({
 
   if (!isOpen) return null
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     const slug = extractRoomSlug(linkInput) ?? getRoomSlugFromLocation()
     if (!slug) {
       setError('올바른 방 주소를 입력해 주세요.')
       return
     }
 
-    const ok = onJoin(slug)
+    const ok = await onJoin(slug)
     if (!ok) {
       setError('방을 찾을 수 없어요. 주소를 다시 확인해 주세요.')
       return
@@ -112,7 +112,7 @@ export default function JoinByLinkModal({
           </button>
           <button
             type="button"
-            onClick={handleJoin}
+            onClick={() => void handleJoin()}
             disabled={!linkInput.trim()}
             className="flex-1 rounded-xl bg-black py-3.5 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:opacity-40"
           >
