@@ -303,13 +303,16 @@ const server = createServer(async (req, res) => {
       } catch {
         keyBytes = -1
       }
+      const firebaseAdmin = getFirebaseAdminStatus()
       sendJson(res, 200, {
         ok: true,
         decryptKeyLoaded: Boolean(key),
         decryptKeyBytes: keyBytes,
         aadLoaded: Boolean(aad),
         aadLength: aad.length,
-        firebaseAdmin: getFirebaseAdminStatus(),
+        // 가이드 확인용: firebaseAdmin.ready === true 여야 Custom Token 발급 가능
+        firebaseAdmin,
+        firebaseAdminReady: firebaseAdmin.ready === true,
       })
       return
     }
@@ -350,8 +353,17 @@ server.listen(PORT, '0.0.0.0', () => {
   } catch {
     keyBytes = -1
   }
+  const firebaseAdmin = getFirebaseAdminStatus()
   console.info(`Toss auth server listening on 0.0.0.0:${PORT}`)
   console.info(
     `decrypt key: ${key ? `loaded (${keyBytes} bytes)` : 'missing'}, aad: ${aad ? `loaded (len ${aad.length})` : 'missing'}`,
   )
+  console.info(
+    `firebaseAdmin.ready: ${firebaseAdmin.ready === true}${firebaseAdmin.projectId ? ` (project=${firebaseAdmin.projectId})` : ''}${firebaseAdmin.error ? ` — ${firebaseAdmin.error}` : ''}`,
+  )
+  if (!firebaseAdmin.ready) {
+    console.warn(
+      '[auth-server] Firebase Admin 미준비 → /api/auth/toss-login 이 Custom Token을 발급하지 못합니다. FIREBASE_SERVICE_ACCOUNT_JSON 을 설정하세요.',
+    )
+  }
 })

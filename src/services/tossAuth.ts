@@ -28,6 +28,24 @@ export function isTossLoginConfigured() {
   return Boolean(authApiBase())
 }
 
+/**
+ * 빌드에 박히는 VITE_TOSS_AUTH_API_URL 이 비어 있으면 즉시 알려요.
+ * (미설정 시 토스→Firebase Custom Token 연동이 불가능합니다)
+ */
+export function assertTossAuthApiUrlConfigured() {
+  const url = authApiBase()
+  if (!url) {
+    const message =
+      '[Auth] VITE_TOSS_AUTH_API_URL 이 비어 있어요. .env에 https://woori-secret-space.onrender.com 등을 넣고 다시 빌드하세요.'
+    console.error(message)
+    if (import.meta.env.PROD) {
+      throw new Error(message)
+    }
+    return
+  }
+  console.info('[Auth] VITE_TOSS_AUTH_API_URL =', url)
+}
+
 export function loadStoredUser(): AuthUser | null {
   try {
     const raw = localStorage.getItem(AUTH_STORAGE_KEY)
@@ -264,10 +282,13 @@ export async function refreshUserDisplayName(
 }
 
 export async function startAppSession(): Promise<AuthUser> {
-  if (isTossLoginConfigured()) {
-    return loginWithToss()
+  // 토스 로그인 → 서버 Custom Token → Firebase signInWithCustomToken 만 사용
+  if (!isTossLoginConfigured()) {
+    throw new Error(
+      'VITE_TOSS_AUTH_API_URL이 비어 있어요. .env에 인증 서버 HTTPS 주소(예: https://woori-secret-space.onrender.com)를 넣고 npm run build 후 다시 배포하세요.',
+    )
   }
-  return resolveAnonymousUser()
+  return loginWithToss()
 }
 
 /** @deprecated startAppSession 사용 */
