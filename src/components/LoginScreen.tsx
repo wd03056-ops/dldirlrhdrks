@@ -9,10 +9,6 @@ const FEATURES = [
     title: '이어 쓰는 이야기',
     body: '사진과 글을 남기고, 같은 이야기에 이어서 대화를 이어가요.',
   },
-  {
-    title: '함께 잡는 일정',
-    body: '모임 일정을 공유하고 구성원이 함께 확인할 수 있어요.',
-  },
 ] as const
 
 /**
@@ -34,8 +30,8 @@ export default function LoginScreen() {
           함께 기록해요
         </h1>
         <p className="mb-8 max-w-sm text-[15px] leading-relaxed text-neutral-500">
-          친구·가족과만 나누는 비공개 공간이에요. 이야기와 사진, 일정을 한곳에
-          모아 둘 수 있어요.
+          친구·가족과만 나누는 비공개 공간이에요. 이야기와 사진을 한곳에 모아 둘
+          수 있어요.
         </p>
 
         <ul className="mb-10 flex flex-col gap-4">

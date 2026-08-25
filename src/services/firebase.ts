@@ -50,6 +50,8 @@ export const db = getFirestore(firebaseApp)
 export const storage = getStorage(firebaseApp)
 export const auth = getAuth(firebaseApp)
 
+/** 최초 onAuthStateChanged 1회 완료 여부 (이후에는 auth.currentUser가 진실) */
+let authInitialized = false
 let authInitPromise: Promise<User | null> | null = null
 let syncInFlight: Promise<User> | null = null
 
@@ -84,14 +86,19 @@ export function formatFirebaseAuthError(error: unknown): string {
   return 'Firebase 인증에 실패했어요.'
 }
 
-/** Auth 초기 복원(세션)이 끝날 때까지 대기 */
+/**
+ * Auth 초기 복원이 끝날 때까지 대기.
+ * 초기화 이후에는 항상 최신 auth.currentUser 를 반환해요.
+ * (로그아웃 후 캐시된 옛 User 객체를 재사용하면 Firestore 쓰기가 실패해요)
+ */
 export function waitForAuthInit(): Promise<User | null> {
-  if (auth.currentUser) return Promise.resolve(auth.currentUser)
+  if (authInitialized) return Promise.resolve(auth.currentUser)
   if (authInitPromise) return authInitPromise
 
   authInitPromise = new Promise<User | null>((resolve) => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       unsubscribe()
+      authInitialized = true
       resolve(user)
     })
   })
@@ -166,6 +173,15 @@ async function fetchFirebaseCustomToken(appUser: AuthUser): Promise<string> {
   return payload.firebaseCustomToken
 }
 
+function matchesAppUser(firebaseUser: User, appUser: AuthUser) {
+  const expectedPrefix = appUser.id
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 128)
+  return (
+    firebaseUser.uid === expectedPrefix || firebaseUser.uid === appUser.id
+  )
+}
+
 /**
  * 앱(토스) 사용자 ↔ Firebase Auth 세션 동기화
  * Custom Token만 사용하며, 익명 로그인은 절대 쓰지 않아요.
@@ -177,18 +193,22 @@ export async function syncFirebaseAuthForAppUser(
   if (syncInFlight) return syncInFlight
 
   syncInFlight = (async () => {
-    const existing = await waitForAuthInit()
-    if (existing && !existing.isAnonymous) {
-      const expectedPrefix = appUser.id
-        .replace(/[^a-zA-Z0-9_-]/g, '_')
-        .slice(0, 128)
-      if (existing.uid === expectedPrefix || existing.uid === appUser.id) {
-        return existing
-      }
+    await waitForAuthInit()
+
+    // 반드시 최신 currentUser 사용 (캐시된 User 객체 금지)
+    const existing = auth.currentUser
+    if (
+      existing &&
+      !existing.isAnonymous &&
+      matchesAppUser(existing, appUser)
+    ) {
+      return existing
     }
 
     if (existing?.isAnonymous) {
       console.warn('[Firebase] 익명 세션 감지 → 로그아웃 후 Custom Token으로 교체')
+      await signOut(auth)
+    } else if (existing && !matchesAppUser(existing, appUser)) {
       await signOut(auth)
     }
 
@@ -206,14 +226,22 @@ export async function syncFirebaseAuthForAppUser(
 /**
  * Storage/Firestore 쓰기 전: 유효한(비익명) Firebase 세션이 있어야 해요.
  */
-export async function ensureFirebaseAuth(): Promise<User> {
-  const existing = await waitForAuthInit()
-  if (existing && !existing.isAnonymous) {
-    return existing
+export async function ensureFirebaseAuth(
+  appUser?: AuthUser | null,
+): Promise<User> {
+  await waitForAuthInit()
+
+  if (isValidFirebaseSession(auth.currentUser)) {
+    return auth.currentUser!
   }
 
-  if (existing?.isAnonymous) {
+  if (auth.currentUser?.isAnonymous) {
     await signOut(auth)
+  }
+
+  // 로그아웃 시 앱 유저로 Custom Token 재동기화 (로그아웃 후 재로그인 복구)
+  if (appUser?.id && !appUser.id.startsWith('temp-')) {
+    return syncFirebaseAuthForAppUser(appUser)
   }
 
   throw new Error(
@@ -222,7 +250,9 @@ export async function ensureFirebaseAuth(): Promise<User> {
 }
 
 export async function signOutFirebase() {
+  syncInFlight = null
   await signOut(auth)
+  // authInitialized 유지 → 이후 waitForAuthInit 는 null currentUser 를 반환
 }
 
 export default firebaseApp

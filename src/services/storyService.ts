@@ -429,7 +429,11 @@ export async function addStory(
   roomId: string | number,
   input: Omit<StoryCreateInput, 'roomId'> & { roomId?: string },
 ): Promise<string> {
-  await ensureFirebaseAuth()
+  await ensureFirebaseAuth(
+    input.authorId
+      ? { id: input.authorId, name: input.authorName ?? '' }
+      : null,
+  )
   const id = resolveFirestoreRoomId(roomId)
 
   let slides =

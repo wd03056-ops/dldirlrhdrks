@@ -146,7 +146,7 @@ export async function createRoomInFirestore(input: {
   room: Room
   user: { id: string; name: string }
 }): Promise<void> {
-  await ensureFirebaseAuth()
+  await ensureFirebaseAuth(input.user)
   const roomId = resolveFirestoreRoomId(input.room.id)
   const roomRef = roomDocument(roomId)
 
@@ -177,7 +177,7 @@ export async function joinRoomInFirestore(input: {
   roomId: string | number
   user: { id: string; name: string }
 }): Promise<RoomMember[]> {
-  await ensureFirebaseAuth()
+  await ensureFirebaseAuth(input.user)
   const roomId = resolveFirestoreRoomId(input.roomId)
   const memberRef = memberDocument(roomId, input.user.id)
   const existing = await getDoc(memberRef)
@@ -211,7 +211,7 @@ export async function leaveRoomInFirestore(input: {
   roomId: string | number
   userId: string
 }): Promise<RoomMember[]> {
-  await ensureFirebaseAuth()
+  await ensureFirebaseAuth({ id: input.userId, name: '' })
   const roomId = resolveFirestoreRoomId(input.roomId)
   await deleteDoc(memberDocument(roomId, input.userId))
 

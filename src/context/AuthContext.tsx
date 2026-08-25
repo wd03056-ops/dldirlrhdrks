@@ -87,9 +87,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     clearStoredUser()
-    void signOutFirebase()
     setUser(null)
     setError(null)
+    void signOutFirebase()
   }, [])
 
   const value = useMemo(

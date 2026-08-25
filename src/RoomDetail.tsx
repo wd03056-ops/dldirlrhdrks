@@ -589,7 +589,7 @@ export default function RoomDetail({
         if (!isValidFirebaseSession(getFirebaseCurrentUser())) {
           await syncFirebaseAuthForAppUser(user)
         } else {
-          await ensureFirebaseAuth()
+          await ensureFirebaseAuth(user)
         }
 
         const meta = await getRoomMeta(firestoreRoomId)
@@ -876,7 +876,7 @@ export default function RoomDetail({
       if (!isValidFirebaseSession(firebaseUser)) {
         firebaseUser = await syncFirebaseAuthForAppUser(user)
       }
-      firebaseUser = await ensureFirebaseAuth()
+      firebaseUser = await ensureFirebaseAuth(user)
 
 
       if (firebaseUser.isAnonymous) {
