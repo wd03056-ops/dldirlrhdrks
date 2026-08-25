@@ -4,6 +4,7 @@ import CreateRoomModal from './CreateRoomModal'
 import FloatingDock from './FloatingDock'
 import JoinByLinkModal from './JoinByLinkModal'
 import OnboardingGuide, { markOnboardingSeen } from './OnboardingGuide'
+import BannerAd from './components/BannerAd'
 import RoomCoverPlaceholder from './components/RoomCoverPlaceholder'
 import RoomDetail from './RoomDetail'
 import StoryModal from './StoryModal'
@@ -500,6 +501,11 @@ export default function AppHome() {
                   ))}
                 </div>
               )}
+
+              {/* 인앱 배너: 화면 너비 100% (가이드), 흰색 테마 */}
+              <div className="-mx-6 mt-6">
+                <BannerAd />
+              </div>
             </div>
           </>
         ) : (
