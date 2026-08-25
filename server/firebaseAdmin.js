@@ -165,11 +165,6 @@ export function initFirebaseAdmin() {
         ? serviceAccount.project_id
         : null
     initError = null
-    console.info('[firebase-admin] 초기화 완료', {
-      ready: true,
-      projectId,
-      clientEmail: serviceAccount.client_email || null,
-    })
     return { ready: true, error: null, projectId }
   } catch (error) {
     initError =
@@ -233,6 +228,5 @@ export async function createFirebaseCustomToken(userId, claims = {}) {
     provider: 'toss',
     ...claims,
   })
-  console.info('[firebase-admin] Custom Token 발급', { uid })
   return { uid, token }
 }

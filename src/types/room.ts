@@ -19,6 +19,7 @@ export type RoomMemory = {
 export type Room = {
   id: number
   slug: string
+  /** 현재 사용자에게 보이는 모임 이름 (멤버별 개인 설정) */
   title: string
   members: number
   memberList: RoomMember[]
@@ -27,7 +28,7 @@ export type Room = {
    * 하위 호환을 위해 필드만 유지.
    */
   lastPhoto: string | null
-  /** 사용자가 카드 롱프레스로 직접 지정한 방 대표 사진만 사용 */
+  /** 현재 사용자에게 보이는 방 대표 사진 (멤버별 개인 설정) */
   coverPhoto?: string | null
   inviteMsg?: string
   memories?: RoomMemory[]

@@ -55,7 +55,7 @@ let syncInFlight: Promise<User> | null = null
 
 function authApiBase() {
   const runtime =
-    typeof window !== 'undefined'
+    import.meta.env.DEV && typeof window !== 'undefined'
       ? (window as Window & { __TOSS_AUTH_API_URL__?: string }).__TOSS_AUTH_API_URL__
       : undefined
   return (runtime || import.meta.env.VITE_TOSS_AUTH_API_URL || '')
@@ -122,9 +122,6 @@ export async function signInFirebaseWithCustomToken(
     await signOut(auth)
     throw new Error('Firebase 로그인 세션이 유효하지 않아요.')
   }
-  console.info('[Firebase] Custom Token 로그인 완료', {
-    uid: credential.user.uid,
-  })
   return credential.user
 }
 
@@ -227,11 +224,5 @@ export async function ensureFirebaseAuth(): Promise<User> {
 export async function signOutFirebase() {
   await signOut(auth)
 }
-
-console.log('[Firebase] 초기화 완료', {
-  projectId: firebaseConfig.projectId,
-  authDomain: firebaseConfig.authDomain,
-  storageBucket: firebaseConfig.storageBucket,
-})
 
 export default firebaseApp

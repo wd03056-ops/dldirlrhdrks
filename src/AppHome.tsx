@@ -14,7 +14,7 @@ import { useToast } from './context/ToastContext'
 import { useLongPress } from './hooks/useLongPress'
 import type { Room } from './types/room'
 import {
-  buildInviteShareLink,
+  buildInviteCopyLink,
   copyTextToClipboard,
   createRoomSlug,
   getRoomSlugFromLocation,
@@ -38,9 +38,12 @@ import {
 import {
   createRoomInFirestore,
   findRoomBySlugInFirestore,
+  getMemberRoomDisplay,
+  getRoomMeta,
   joinRoomInFirestore,
   leaveRoomInFirestore,
-  updateRoomMetaInFirestore,
+  resolveMemberRoomDisplay,
+  updateMemberRoomDisplayInFirestore,
   withLiveMembers,
 } from './services/roomService'
 
@@ -181,6 +184,67 @@ export default function AppHome() {
     return normalized
   }, [])
 
+  // 멤버별 이름·커버 동기화 + 로컬 설정을 Firestore로 이전
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+
+    void (async () => {
+      const current = loadStoredRooms()
+      if (current.length === 0) return
+
+      let changed = false
+      const next = current.map((room) => ({ ...room }))
+
+      for (let i = 0; i < next.length; i++) {
+        if (cancelled) return
+        const room = next[i]
+        try {
+          const prefs = await getMemberRoomDisplay(room.id, user.id)
+          if (prefs?.displayTitle || prefs?.hasDisplayCover) {
+            const meta = await getRoomMeta(room.id)
+            const display = resolveMemberRoomDisplay(
+              {
+                title: meta?.title ?? room.title,
+                coverPhoto: meta?.coverPhoto ?? null,
+              },
+              prefs,
+              room,
+            )
+            if (
+              display.title !== room.title ||
+              display.coverPhoto !== (room.coverPhoto ?? null)
+            ) {
+              next[i] = {
+                ...room,
+                title: display.title,
+                coverPhoto: display.coverPhoto,
+              }
+              changed = true
+            }
+          } else if (room.title.trim()) {
+            await updateMemberRoomDisplayInFirestore({
+              roomId: room.id,
+              userId: user.id,
+              title: room.title,
+              coverPhoto: room.coverPhoto ?? null,
+            })
+          }
+        } catch {
+          // 방별 실패는 무시
+        }
+      }
+
+      if (!cancelled && changed) {
+        persistRooms(next)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [persistRooms, user])
+
   const openRoom = useCallback(
     (room: Room, options?: { replace?: boolean }) => {
       setSelectedRoomId(room.id)
@@ -196,12 +260,17 @@ export default function AppHome() {
 
   const enterRoomFromSlug = useCallback(
     async (slug: string, options?: { replace?: boolean; silent?: boolean }) => {
-      let room = findRoomBySlug(rooms, slug)
+      const localRoom = findRoomBySlug(rooms, slug)
+      let room = localRoom
+      let sharedTitle: string | null = null
+      let sharedCover: string | null = null
 
       if (!room) {
         try {
           const remote = await findRoomBySlugInFirestore(slug)
           if (remote) {
+            sharedTitle = remote.title
+            sharedCover = remote.coverPhoto
             room = withRoomSlug({
               id: remote.id,
               title: remote.title,
@@ -215,6 +284,18 @@ export default function AppHome() {
           }
         } catch (error) {
           console.error('[AppHome] Firestore slug 조회 실패', error)
+        }
+      } else {
+        sharedTitle = room.title
+        sharedCover = room.coverPhoto ?? null
+        try {
+          const meta = await getRoomMeta(room.id)
+          if (meta) {
+            sharedTitle = meta.title
+            sharedCover = meta.coverPhoto
+          }
+        } catch {
+          // 오프라인이면 로컬 값 유지
         }
       }
 
@@ -235,6 +316,26 @@ export default function AppHome() {
             user: { id: user.id, name: user.name },
           })
           joinedRoom = withLiveMembers(joinedRoom, members)
+
+          const prefs = await getMemberRoomDisplay(room.id, user.id)
+          const display = resolveMemberRoomDisplay(
+            {
+              title: sharedTitle ?? room.title,
+              coverPhoto: sharedCover,
+            },
+            prefs,
+            localRoom
+              ? {
+                  title: localRoom.title,
+                  coverPhoto: localRoom.coverPhoto,
+                }
+              : null,
+          )
+          joinedRoom = {
+            ...joinedRoom,
+            title: display.title,
+            coverPhoto: display.coverPhoto,
+          }
         } catch (error) {
           console.error('[AppHome] Firestore 참여 실패', error)
         }
@@ -576,7 +677,15 @@ export default function AppHome() {
         onSelect={(room) => {
           void (async () => {
             const slug = room.slug ?? createRoomSlug()
-            const link = await buildInviteShareLink(slug)
+            // Share.createLink 단축 URL은 slug가 없어 붙여넣기 참여가 안 됨
+            const link = buildInviteCopyLink(slug)
+            if (!room.slug) {
+              persistRooms(
+                rooms.map((item) =>
+                  item.id === room.id ? { ...item, slug } : item,
+                ),
+              )
+            }
             await copyTextToClipboard(link)
             setIsCopyLinkOpen(false)
             showToast('초대 주소를 복사했어요')
@@ -600,7 +709,7 @@ export default function AppHome() {
           setEditingRoom(null)
         }}
         onSave={({ title, lastPhoto }) => {
-          if (!editingRoom) return
+          if (!editingRoom || !user) return
           const nextRoom = withRoomSlug({
             ...editingRoom,
             title,
@@ -613,16 +722,18 @@ export default function AppHome() {
               room.id === editingRoom.id ? nextRoom : room,
             ),
           )
-          void updateRoomMetaInFirestore({
+          // 개인 표시 설정만 저장 — 다른 멤버 화면은 그대로
+          void updateMemberRoomDisplayInFirestore({
             roomId: editingRoom.id,
+            userId: user.id,
             title,
             coverPhoto: lastPhoto,
           }).catch((error) => {
-            console.error('[AppHome] Firestore 방 수정 실패', error)
+            console.error('[AppHome] 개인 모임 설정 저장 실패', error)
           })
           setIsRoomEditOpen(false)
           setEditingRoom(null)
-          showToast('모임이 수정되었어요.')
+          showToast('내 모임 설정이 저장되었어요.')
         }}
         onUploadError={(message) => showToast(message)}
       />

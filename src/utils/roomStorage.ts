@@ -72,11 +72,15 @@ export function upsertRoom(rooms: Room[], room: Room) {
 
   const prev = rooms[index]
   const next = [...rooms]
-  // 초대 참여 등으로 병합해도 기존 커스텀 커버는 유지, 게시물 사진으로 덮지 않음
+  // 개인 이름·커버는 호출 측에서 넘긴 값을 우선 (공유 메타로 덮지 않음)
   next[index] = normalizeRoom({
     ...prev,
     ...normalized,
-    coverPhoto: normalized.coverPhoto ?? prev.coverPhoto ?? null,
+    title: normalized.title || prev.title,
+    coverPhoto:
+      normalized.coverPhoto !== undefined
+        ? normalized.coverPhoto
+        : (prev.coverPhoto ?? null),
     lastPhoto: null,
   })
   return next

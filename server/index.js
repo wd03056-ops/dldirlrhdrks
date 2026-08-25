@@ -183,16 +183,8 @@ async function handleTossLogin(req, res) {
 
   if (!displayName) {
     console.warn('[auth-server] 실명을 추출하지 못했어요', {
-      userKey: profile.userKey,
       hasNameField: profile.name != null && profile.name !== '',
       nameLooksEncrypted: extracted.encrypted,
-      scope: profile.scope ?? null,
-    })
-  } else {
-    console.info('[auth-server] 실명 추출 성공', {
-      userKey: profile.userKey,
-      source: extracted.source,
-      nameLength: displayName.length,
     })
   }
 
@@ -347,19 +339,10 @@ const server = createServer(async (req, res) => {
 // Render는 0.0.0.0:$PORT 로 바인딩해야 헬스체크/외부 요청이 통과합니다.
 server.listen(PORT, '0.0.0.0', () => {
   const { key, aad } = loadDecryptSecrets()
-  let keyBytes = 0
-  try {
-    keyBytes = key ? Buffer.from(key, 'base64').length : 0
-  } catch {
-    keyBytes = -1
-  }
   const firebaseAdmin = getFirebaseAdminStatus()
   console.info(`Toss auth server listening on 0.0.0.0:${PORT}`)
   console.info(
-    `decrypt key: ${key ? `loaded (${keyBytes} bytes)` : 'missing'}, aad: ${aad ? `loaded (len ${aad.length})` : 'missing'}`,
-  )
-  console.info(
-    `firebaseAdmin.ready: ${firebaseAdmin.ready === true}${firebaseAdmin.projectId ? ` (project=${firebaseAdmin.projectId})` : ''}${firebaseAdmin.error ? ` — ${firebaseAdmin.error}` : ''}`,
+    `decrypt: ${key && aad ? 'ready' : 'missing'}, firebaseAdmin: ${firebaseAdmin.ready === true ? 'ready' : 'not ready'}`,
   )
   if (!firebaseAdmin.ready) {
     console.warn(

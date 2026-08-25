@@ -25,28 +25,12 @@ export default function BannerAd({
 
     setCollapsed(false)
     const attached = attachBanner(adGroupId, containerRef.current, {
-      // 흰색 배너
       theme: 'light',
       tone: 'blackAndWhite',
       variant: 'expanded',
       callbacks: {
-        onAdRendered: (payload) => {
-          console.info('[Ads] 배너 렌더링', payload.slotId)
-          setCollapsed(false)
-        },
-        onAdImpression: (payload) => {
-          console.info('[Ads] 배너 노출', payload.slotId)
-        },
-        onAdViewable: (payload) => {
-          console.info('[Ads] 배너 viewable', payload.slotId)
-        },
-        onAdClicked: (payload) => {
-          console.info('[Ads] 배너 클릭', payload.slotId)
-        },
-        onNoFill: () => {
-          console.warn('[Ads] 배너 no-fill')
-          setCollapsed(true)
-        },
+        onAdRendered: () => setCollapsed(false),
+        onNoFill: () => setCollapsed(true),
         onAdFailedToRender: (payload) => {
           console.error('[Ads] 배너 렌더 실패', payload.error)
           setCollapsed(true)
@@ -67,7 +51,6 @@ export default function BannerAd({
       style={{ height: collapsed ? 0 : 96 }}
       aria-hidden={collapsed}
     >
-      {/* 고정형 배너: width 100% + height 96px (가이드 권장) */}
       <div
         ref={containerRef}
         className="w-full bg-white"

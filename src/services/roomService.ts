@@ -33,6 +33,35 @@ export type FirestoreRoomMeta = {
   createdBy?: string | null
 }
 
+/** 멤버별 모임 이름·커버 (본인에게만 보임) */
+export type MemberRoomDisplayPrefs = {
+  displayTitle?: string
+  /** displayCoverPhoto 필드가 문서에 있으면 true (null = 사진 없음) */
+  hasDisplayCover: boolean
+  displayCoverPhoto: string | null
+}
+
+export function resolveMemberRoomDisplay(
+  shared: { title: string; coverPhoto?: string | null },
+  prefs: MemberRoomDisplayPrefs | null,
+  local?: { title?: string; coverPhoto?: string | null } | null,
+): { title: string; coverPhoto: string | null } {
+  const personalTitle = prefs?.displayTitle?.trim()
+  const localTitle = local?.title?.trim()
+  const title = personalTitle || localTitle || shared.title
+
+  let coverPhoto: string | null
+  if (prefs?.hasDisplayCover) {
+    coverPhoto = prefs.displayCoverPhoto
+  } else if (local && 'coverPhoto' in local) {
+    coverPhoto = local.coverPhoto ?? null
+  } else {
+    coverPhoto = shared.coverPhoto ?? null
+  }
+
+  return { title, coverPhoto }
+}
+
 function mapMember(
   snap: QueryDocumentSnapshot<DocumentData> | { id: string; data: () => DocumentData },
 ): RoomMember {
@@ -137,6 +166,9 @@ export async function createRoomInFirestore(input: {
     name: input.user.name,
     numericId: Date.now(),
     joinedAt: serverTimestamp(),
+    // 만든 사람의 개인 표시 설정 (다른 멤버와 독립)
+    displayTitle: input.room.title,
+    displayCoverPhoto: input.room.coverPhoto ?? null,
   })
 }
 
@@ -230,6 +262,7 @@ export async function findRoomBySlugInFirestore(
   }
 }
 
+/** @deprecated 모임 이름·사진은 멤버별 개인 설정으로 저장하세요. */
 export async function updateRoomMetaInFirestore(input: {
   roomId: string | number
   title?: string
@@ -243,6 +276,52 @@ export async function updateRoomMetaInFirestore(input: {
   if (input.coverPhoto !== undefined) patch.coverPhoto = input.coverPhoto
 
   await updateDoc(roomDocument(input.roomId), patch)
+}
+
+export async function getMemberRoomDisplay(
+  roomId: string | number,
+  userId: string,
+): Promise<MemberRoomDisplayPrefs | null> {
+  await ensureFirebaseAuth()
+  const snap = await getDoc(memberDocument(roomId, userId))
+  if (!snap.exists()) return null
+
+  const data = snap.data() ?? {}
+  const displayTitle =
+    typeof data.displayTitle === 'string' ? data.displayTitle.trim() : undefined
+
+  return {
+    displayTitle: displayTitle || undefined,
+    hasDisplayCover: Object.prototype.hasOwnProperty.call(data, 'displayCoverPhoto'),
+    displayCoverPhoto:
+      typeof data.displayCoverPhoto === 'string' || data.displayCoverPhoto === null
+        ? (data.displayCoverPhoto as string | null)
+        : null,
+  }
+}
+
+/** 현재 사용자만의 모임 이름·커버 저장 (공유 rooms 문서는 변경하지 않음) */
+export async function updateMemberRoomDisplayInFirestore(input: {
+  roomId: string | number
+  userId: string
+  title: string
+  coverPhoto: string | null
+}): Promise<void> {
+  await ensureFirebaseAuth()
+  const title = input.title.trim()
+  if (!title) {
+    throw new Error('모임 이름을 입력해 주세요.')
+  }
+
+  await setDoc(
+    memberDocument(input.roomId, input.userId),
+    {
+      userId: input.userId,
+      displayTitle: title,
+      displayCoverPhoto: input.coverPhoto,
+    },
+    { merge: true },
+  )
 }
 
 /** Firestore 멤버 목록을 Room 필드에 반영 */

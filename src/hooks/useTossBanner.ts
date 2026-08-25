@@ -53,7 +53,6 @@ function ensureTossAdsInitialized(onDone: (ready: boolean) => void) {
   TossAds.initialize({
     callbacks: {
       onInitialized: () => {
-        console.info('[Ads] TossAds 초기화 완료')
         initStatus = 'ready'
         initListeners.forEach((listener) => listener(true))
         initListeners.clear()

@@ -45,8 +45,16 @@ export function buildIntossRoomPath(slug: string) {
 }
 
 /**
+ * '주소로 참여하기'에 붙여넣을 수 있는 초대 주소
+ * (Share.createLink 단축 URL은 slug가 없어 붙여넣기 참여에 쓸 수 없음)
+ */
+export function buildInviteCopyLink(slug: string) {
+  return buildIntossRoomPath(slug)
+}
+
+/**
  * 초대 공유 링크 생성
- * - 토스: Share.createLink(intoss://…)
+ * - 토스: Share.createLink(intoss://…) — 외부 공유용
  * - 그 외: 웹 URL 폴백
  */
 export async function buildInviteShareLink(slug: string) {
@@ -56,6 +64,76 @@ export async function buildInviteShareLink(slug: string) {
   } catch {
     return buildRoomUrl(slug)
   }
+}
+
+/**
+ * 붙여넣은 초대 주소/텍스트에서 room slug 추출
+ * - intoss://…/room/{slug}
+ * - https://…/room/{slug}
+ * - 토스 공유 링크 query에 path가 실린 경우
+ * - slug 원문
+ */
+export function extractRoomSlug(input: string): string | null {
+  const trimmed = input.trim()
+  if (!trimmed) return null
+
+  const fromRoomPath = (value: string) => {
+    const match = value.match(/\/room\/([^/?#\s]+)/i)
+    if (!match) return null
+    try {
+      return decodeURIComponent(match[1])
+    } catch {
+      return match[1]
+    }
+  }
+
+  // intoss://woori-secret-space/room/{slug}
+  const intossMatch = trimmed.match(
+    /^intoss:\/\/[^/\s]+\/room\/([^/?#\s]+)/i,
+  )
+  if (intossMatch) {
+    try {
+      return decodeURIComponent(intossMatch[1])
+    } catch {
+      return intossMatch[1]
+    }
+  }
+
+  const pathHit = fromRoomPath(trimmed)
+  if (pathHit) return pathHit
+
+  try {
+    const url = new URL(trimmed)
+
+    const pathMatch = url.pathname.match(/\/room\/([^/]+)\/?$/i)
+    if (pathMatch) return decodeURIComponent(pathMatch[1])
+
+    const hashHit = fromRoomPath(url.hash)
+    if (hashHit) return hashHit
+
+    for (const key of ['path', 'slug', 'room', 'roomSlug', 'redirectUrl', 'url']) {
+      const raw = url.searchParams.get(key)
+      if (!raw) continue
+      const nested = extractRoomSlug(raw)
+      if (nested) return nested
+    }
+  } catch {
+    // not a full URL
+  }
+
+  if (/^[a-f0-9]{32}$/i.test(trimmed)) return trimmed.toLowerCase()
+  if (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      trimmed,
+    )
+  ) {
+    return trimmed.replace(/-/g, '').toLowerCase()
+  }
+  // 구버전 제목-숫자 slug
+  if (/^[^/\s]+-\d+$/.test(trimmed)) return trimmed
+  if (/^[a-zA-Z0-9_-]{16,}$/.test(trimmed)) return trimmed
+
+  return null
 }
 
 export function getRoomSlugFromLocation() {

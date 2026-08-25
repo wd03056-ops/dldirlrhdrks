@@ -1,38 +1,10 @@
 import { useEffect, useState } from 'react'
-import { getRoomSlugFromLocation } from './utils/roomLinks'
+import { extractRoomSlug, getRoomSlugFromLocation } from './utils/roomLinks'
 
 type JoinByLinkModalProps = {
   isOpen: boolean
   onClose: () => void
   onJoin: (slug: string) => boolean | Promise<boolean>
-}
-
-function extractRoomSlug(input: string) {
-  const trimmed = input.trim()
-  if (!trimmed) return null
-
-  try {
-    const url = new URL(trimmed)
-    const pathMatch = url.pathname.match(/^\/room\/([^/]+)\/?$/)
-    if (pathMatch) return decodeURIComponent(pathMatch[1])
-
-    const hashMatch = url.hash.match(/^#\/room\/([^/]+)\/?$/)
-    if (hashMatch) return decodeURIComponent(hashMatch[1])
-  } catch {
-    // not a full URL
-  }
-
-  const pathOnly = trimmed.match(/\/room\/([^/?#]+)\/?/)
-  if (pathOnly) return decodeURIComponent(pathOnly[1])
-
-  if (/^[a-f0-9]{32}$/i.test(trimmed)) return trimmed
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trimmed)) {
-    return trimmed.replace(/-/g, '')
-  }
-  if (/^[^/\s]+-\d+$/.test(trimmed)) return trimmed
-  if (/^[a-zA-Z0-9_-]{16,}$/.test(trimmed)) return trimmed
-
-  return null
 }
 
 export default function JoinByLinkModal({
@@ -94,7 +66,7 @@ export default function JoinByLinkModal({
             setLinkInput(e.target.value)
             setError(null)
           }}
-          placeholder="예: https://.../room/a7f3c91e2b4d8e6f..."
+          placeholder="예: intoss://woori-secret-space/room/…"
           className="mt-5 w-full rounded-xl border-0 bg-[#F7F6F3] px-4 py-3.5 text-sm text-black placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-black/10"
         />
 

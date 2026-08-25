@@ -137,7 +137,6 @@ export default function RoomCalendar({
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
-    console.log('[RoomCalendar] Firestore roomId =', firestoreRoomId)
   }, [firestoreRoomId])
 
   useEffect(() => {
@@ -306,13 +305,6 @@ export default function RoomCalendar({
     const endDateKey = toDateKey(endDate)
     const targetRoomId = resolveFirestoreRoomId(roomId)
 
-    console.log('[RoomCalendar] 일정 저장 버튼 → handleSave', {
-      mode: scheduleModalMode,
-      targetRoomId,
-      title,
-      startDateKey,
-      endDateKey,
-    })
 
     setIsSaving(true)
 
@@ -333,7 +325,6 @@ export default function RoomCalendar({
           allMemberKeys.length > 0 &&
           allMemberKeys.every((id) => creatorIds.includes(id))
 
-        console.log('[RoomCalendar] addSchedule 직전 호출')
         const scheduleId = await addSchedule(targetRoomId, {
           roomId: targetRoomId,
           title,
@@ -344,7 +335,6 @@ export default function RoomCalendar({
           status: isAllConfirmed ? 'confirmed' : 'pending',
           createdBy: user?.id,
         })
-        console.log('[RoomCalendar] addSchedule 완료', scheduleId)
 
         const notified = notifyScheduleCreated({
           roomId: Number(roomId) || 0,

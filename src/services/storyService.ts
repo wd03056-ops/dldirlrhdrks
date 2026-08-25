@@ -340,10 +340,6 @@ export async function getStoriesPage(
   if (isFirstPage && !options?.forceRefresh) {
     const cached = getCachedRoom(id)
     if (cached && cached.stories.length > 0) {
-      console.log('[Firestore] getStoriesPage cache hit', {
-        roomId: id,
-        count: cached.stories.length,
-      })
       return {
         stories: cached.stories,
         lastDoc: cached.lastDoc,
@@ -361,11 +357,6 @@ export async function getStoriesPage(
 
   const pageQuery = query(storiesCollection(id), ...constraints)
 
-  console.log('[Firestore] getStoriesPage →', {
-    path: `rooms/${id}/stories`,
-    pageSize,
-    hasCursor: Boolean(cursor),
-  })
 
   const snapshot = await getDocs(pageQuery)
   const pageStories = snapshot.docs.map((snap) => mapStory(snap, id))
@@ -489,14 +480,8 @@ export async function addStory(
     updatedAt: serverTimestamp(),
   }
 
-  console.log('[Firestore] addStory addDoc 호출', {
-    path: `rooms/${id}/stories`,
-    title: payload.title,
-    slideCount: slides.length,
-  })
 
   const ref = await addDoc(storiesCollection(id), payload)
-  console.log('[Firestore] addStory 성공 id=', ref.id)
 
   upsertCachedStory(id, {
     id: ref.id,
@@ -541,7 +526,6 @@ export async function updateStory(
     }
   }
 
-  console.log('[Firestore] updateStory', { roomId: id, storyId, input })
   await updateDoc(storyDocument(id, storyId), next)
 
   const cached = storiesRoomCache.get(id)
@@ -587,11 +571,6 @@ export async function appendStorySlides(
     .map((slide) => slide.url)
     .filter((url): url is string => Boolean(url))
 
-  console.log('[Firestore] appendStorySlides arrayUnion', {
-    roomId: id,
-    storyId,
-    addCount: appended.length,
-  })
 
   const patch: Record<string, unknown> = {
     slides: arrayUnion(...appended),
@@ -628,7 +607,6 @@ export async function deleteStory(
   )
 
   if (!existing || remaining.length === 0) {
-    console.log('[Firestore] deleteStory', { roomId: id, storyId })
     await deleteDoc(storyDocument(id, storyId))
     removeCachedStory(id, storyId)
     return { keptAppended: false }
@@ -649,11 +627,6 @@ export async function deleteStory(
     authorName: first.authorName,
   }
 
-  console.log('[Firestore] deleteStory keep appended', {
-    roomId: id,
-    storyId,
-    remaining: remaining.length,
-  })
 
   await updateDoc(storyDocument(id, storyId), {
     title: nextStory.title,

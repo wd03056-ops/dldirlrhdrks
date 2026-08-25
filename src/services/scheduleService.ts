@@ -52,7 +52,6 @@ function sortByStartDate(list: Schedule[]) {
 /** rooms/{roomId}/schedules 목록 조회 (1회) */
 export async function getSchedules(roomId: string | number): Promise<Schedule[]> {
   const id = resolveFirestoreRoomId(roomId)
-  console.log('[Firestore] getSchedules →', `rooms/${id}/schedules`)
   const snapshot = await getDocs(schedulesCollection(id))
   return sortByStartDate(snapshot.docs.map((snap) => mapSchedule(snap, id)))
 }
@@ -67,14 +66,12 @@ export function subscribeSchedules(
   onError?: (error: Error) => void,
 ): Unsubscribe {
   const id = resolveFirestoreRoomId(roomId)
-  console.log('[Firestore] subscribeSchedules →', `rooms/${id}/schedules`)
   return onSnapshot(
     schedulesCollection(id),
     (snapshot) => {
       const list = sortByStartDate(
         snapshot.docs.map((snap) => mapSchedule(snap, id)),
       )
-      console.log('[Firestore] schedules snapshot', list.length, '건')
       onData(list)
     },
     (error) => {
@@ -115,13 +112,8 @@ export async function addSchedule(
     updatedAt: serverTimestamp(),
   }
 
-  console.log('[Firestore] addSchedule addDoc 호출', {
-    path: `rooms/${id}/schedules`,
-    payload: { ...payload, createdAt: '(serverTimestamp)', updatedAt: '(serverTimestamp)' },
-  })
 
   const ref = await addDoc(schedulesCollection(id), payload)
-  console.log('[Firestore] addSchedule 성공 id=', ref.id)
   return ref.id
 }
 
@@ -133,7 +125,6 @@ export async function updateSchedule(
 ): Promise<void> {
   await ensureFirebaseAuth()
   const id = resolveFirestoreRoomId(roomId)
-  console.log('[Firestore] updateSchedule', { roomId: id, scheduleId, input })
   await updateDoc(scheduleDocument(id, scheduleId), {
     ...input,
     updatedAt: serverTimestamp(),
@@ -147,7 +138,6 @@ export async function deleteSchedule(
 ): Promise<void> {
   await ensureFirebaseAuth()
   const id = resolveFirestoreRoomId(roomId)
-  console.log('[Firestore] deleteSchedule', { roomId: id, scheduleId })
   await deleteDoc(scheduleDocument(id, scheduleId))
 }
 

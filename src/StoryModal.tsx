@@ -68,14 +68,7 @@ export default function StoryModal({
 
   const handleSave = () => {
     if (busy) return
-    if (!title.trim()) {
-      console.warn('[StoryModal] 저장 불가 — 제목이 비어 있어요')
-      return
-    }
-    console.log('[StoryModal] 저장 클릭 → onSave 호출', {
-      title: title.trim(),
-      photoCount: photos.length,
-    })
+    if (!title.trim()) return
     onSave({
       title: title.trim(),
       lastPhoto: photos[0] ?? null,
@@ -335,3 +328,4 @@ export default function StoryModal({
     </div>
   )
 }
+

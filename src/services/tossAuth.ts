@@ -6,14 +6,17 @@ const AUTH_STORAGE_KEY = 'woori-auth-user-v5'
 
 declare global {
   interface Window {
-    /** 빌드 없이 테스트할 때 런타임으로 인증 서버 URL을 덮어쓸 수 있어요 */
+    /** DEV 전용: 인증 서버 URL 런타임 오버라이드 */
     __TOSS_AUTH_API_URL__?: string
   }
 }
 
 function authApiBase() {
+  // 개발 빌드에서만 런타임 오버라이드 허용 (프로덕션에서는 .env 빌드값만 사용)
   const runtime =
-    typeof window !== 'undefined' ? window.__TOSS_AUTH_API_URL__ : undefined
+    import.meta.env.DEV && typeof window !== 'undefined'
+      ? window.__TOSS_AUTH_API_URL__
+      : undefined
   return (runtime || import.meta.env.VITE_TOSS_AUTH_API_URL || '')
     .trim()
     .replace(/\/$/, '')
@@ -43,7 +46,6 @@ export function assertTossAuthApiUrlConfigured() {
     }
     return
   }
-  console.info('[Auth] VITE_TOSS_AUTH_API_URL =', url)
 }
 
 export function loadStoredUser(): AuthUser | null {
@@ -213,57 +215,6 @@ export async function loginWithToss(): Promise<AuthUser> {
 }
 
 /**
- * 비게임 사용자 식별키 + (가능하면) 동의 기반 실명
- * @see https://developers-apps-in-toss.toss.im/documentation/common/authentication/hash-key
- * @see https://developers-apps-in-toss.toss.im/documentation/common/user-info
- */
-export async function resolveAnonymousUser(): Promise<AuthUser> {
-  try {
-    if (!User.getAnonymousKey.isSupported()) {
-      console.warn('[Auth] getAnonymousKey 미지원 환경')
-    } else {
-      const keyResult: unknown = await User.getAnonymousKey()
-
-      if (keyResult === undefined) {
-        throw new Error('지원하지 않는 SDK/앱 버전이에요.')
-      }
-      if (keyResult === 'INVALID_CATEGORY') {
-        throw new Error('비게임 카테고리 미니앱에서만 식별키를 쓸 수 있어요.')
-      }
-      if (keyResult === 'ERROR') {
-        throw new Error('사용자 식별키를 가져오지 못했어요.')
-      }
-      if (
-        keyResult &&
-        typeof keyResult === 'object' &&
-        'type' in keyResult &&
-        'hash' in keyResult &&
-        (keyResult as { type: string; hash: string }).type === 'HASH' &&
-        (keyResult as { hash: string }).hash
-      ) {
-        const hash = (keyResult as { hash: string }).hash
-        const name = await resolveDisplayName(hash)
-        const user: AuthUser = {
-          id: hash,
-          name,
-          authMethod: 'anonymous-key',
-        }
-        await syncFirebaseAuthForAppUser(user)
-        saveStoredUser(user)
-        return user
-      }
-    }
-  } catch (error) {
-    console.warn('[Auth] getAnonymousKey 실패', error)
-    if (isInTossApp()) throw error
-  }
-
-  throw new Error(
-    '유효한 토스 사용자 세션이 없어요. 토스 앱에서 다시 열어 주세요.',
-  )
-}
-
-/**
  * 저장된 닉네임이 이상하면(토스유저·암호문) 실명으로 다시 채워요.
  */
 export async function refreshUserDisplayName(
@@ -289,11 +240,6 @@ export async function startAppSession(): Promise<AuthUser> {
     )
   }
   return loginWithToss()
-}
-
-/** @deprecated startAppSession 사용 */
-export async function loginForTestPhase(): Promise<AuthUser> {
-  return startAppSession()
 }
 
 export async function restoreSession(): Promise<AuthUser | null> {

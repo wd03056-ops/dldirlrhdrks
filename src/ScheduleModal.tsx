@@ -85,20 +85,7 @@ export default function ScheduleModal({
     toInputValue(endDate) >= toInputValue(startDate)
 
   const handleSave = () => {
-    if (!title.trim() || !startDate || !endDate || !rangeValid) {
-      console.warn('[ScheduleModal] 저장 불가 — 제목/기간을 확인해 주세요', {
-        title,
-        startValue,
-        endValue,
-        rangeValid,
-      })
-      return
-    }
-    console.log('[ScheduleModal] 저장 클릭 → onSave 호출', {
-      title: title.trim(),
-      startValue,
-      endValue,
-    })
+    if (!title.trim() || !startDate || !endDate || !rangeValid) return
     onSave({
       title: title.trim(),
       memo: memo.trim(),
@@ -208,3 +195,4 @@ export default function ScheduleModal({
     </div>
   )
 }
+

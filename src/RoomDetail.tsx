@@ -718,7 +718,6 @@ export default function RoomDetail({
   }, [applyPageResult, firestoreRoomId, hasMoreStories, showToast])
 
   useEffect(() => {
-    console.log('[RoomDetail] Firestore roomId =', firestoreRoomId)
     pageCursorRef.current = null
     void loadFirstPage(false)
   }, [firestoreRoomId, loadFirstPage])
@@ -825,12 +824,6 @@ export default function RoomDetail({
       }
       firebaseUser = await ensureFirebaseAuth()
 
-      console.info('[RoomDetail] 저장 전 인증 상태', {
-        tossUserId: user.id,
-        firebaseUid: firebaseUser.uid,
-        isAnonymous: firebaseUser.isAnonymous,
-        hasPhotos: draftFields.photos.length > 0,
-      })
 
       if (firebaseUser.isAnonymous) {
         throw new Error('익명 Firebase 세션으로는 글을 등록할 수 없어요.')
