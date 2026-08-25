@@ -9,12 +9,14 @@ import { resolveFirestoreRoomId } from '../utils/firestoreRoomId'
  * - 멤버:   rooms/{roomId}/members/{userId}
  * - 이야기: rooms/{roomId}/stories/{storyId}
  * - 일정:   rooms/{roomId}/schedules/{scheduleId}
+ * - 인박스: rooms/{roomId}/inbox/{notificationId}
  */
 export const FIRESTORE_PATHS = {
   rooms: 'rooms',
   members: 'members',
   stories: 'stories',
   schedules: 'schedules',
+  inbox: 'inbox',
 } as const
 
 export function roomDocument(roomId: string | number) {
@@ -65,5 +67,21 @@ export function scheduleDocument(roomId: string | number, scheduleId: string) {
     id,
     FIRESTORE_PATHS.schedules,
     scheduleId,
+  )
+}
+
+export function inboxCollection(roomId: string | number) {
+  const id = resolveFirestoreRoomId(roomId)
+  return collection(db, FIRESTORE_PATHS.rooms, id, FIRESTORE_PATHS.inbox)
+}
+
+export function inboxDocument(roomId: string | number, notificationId: string) {
+  const id = resolveFirestoreRoomId(roomId)
+  return doc(
+    db,
+    FIRESTORE_PATHS.rooms,
+    id,
+    FIRESTORE_PATHS.inbox,
+    notificationId,
   )
 }

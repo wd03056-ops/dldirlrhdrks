@@ -36,6 +36,11 @@ import {
   getUnreadScheduleNotifications,
   markRoomScheduleNotificationsRead,
 } from './utils/scheduleNotifications'
+import {
+  getUnreadInboxNotifications,
+  markRoomInboxRead,
+  notifyMembersStoryInbox,
+} from './services/notificationService'
 import { resolveFirestoreRoomId } from './utils/firestoreRoomId'
 import type { AuthUser } from './types/auth'
 import type { DocumentData, QueryDocumentSnapshot } from 'firebase/firestore'
@@ -744,19 +749,68 @@ export default function RoomDetail({
   ])
 
   useEffect(() => {
-    if (!user) return
-    const unread = getUnreadScheduleNotifications(user, room.id)
-    if (unread.length === 0) return
+    if (!user?.id || user.id.startsWith('temp-')) return
+    let cancelled = false
 
-    const latest = unread[0]
-    showToast(
-      unread.length === 1
-        ? `새 일정: ${latest.scheduleTitle}`
-        : `새 일정 ${unread.length}건이 있어요`,
-    )
-    markRoomScheduleNotificationsRead(user, room.id)
-  }, [room.id, user, showToast])
+    void (async () => {
+      try {
+        const unread = await getUnreadInboxNotifications(
+          firestoreRoomId,
+          user.id,
+        )
+        if (cancelled || unread.length === 0) return
 
+        const latest = unread[0]
+        const kind =
+          latest.type === 'story_appended' ? '이어 쓴 글' : '새 이야기'
+        showToast(
+          unread.length === 1
+            ? `${kind}: ${latest.title || '제목 없음'}`
+            : `새 알림 ${unread.length}건이 있어요`,
+        )
+        await markRoomInboxRead(firestoreRoomId, user.id)
+      } catch (error) {
+        console.error('[RoomDetail] 인박스 알림 조회 실패', error)
+      }
+
+      if (cancelled) return
+      const scheduleUnread = getUnreadScheduleNotifications(user, room.id)
+      if (scheduleUnread.length === 0) return
+
+      const latest = scheduleUnread[0]
+      showToast(
+        scheduleUnread.length === 1
+          ? `새 일정: ${latest.scheduleTitle}`
+          : `새 일정 ${scheduleUnread.length}건이 있어요`,
+      )
+      markRoomScheduleNotificationsRead(user, room.id)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [firestoreRoomId, room.id, user, showToast])
+
+  const notifyStoryToMembers = (
+    storyId: string,
+    storyTitle: string,
+    type: 'story_created' | 'story_appended',
+  ) => {
+    if (!user?.id) return
+    void notifyMembersStoryInbox({
+      roomId: firestoreRoomId,
+      storyId,
+      title: storyTitle,
+      type,
+      authorId: user.id,
+      authorName: user.name,
+      memberUserIds: members
+        .map((member) => member.userId)
+        .filter((id): id is string => Boolean(id)),
+    }).catch((error) => {
+      console.error('[RoomDetail] 인박스 알림 생성 실패', error)
+    })
+  }
   const openStoryCreate = () => {
     setStoryMode('create')
     setEditingStory(null)
@@ -877,6 +931,11 @@ export default function RoomDetail({
           }
         })
         showToast('사진/글을 추가했어요')
+        notifyStoryToMembers(
+          target.id,
+          title || target.title || '새 이야기',
+          'story_appended',
+        )
       } else if (mode === 'edit' && target) {
         const slides =
           photos.length > 0
@@ -966,6 +1025,7 @@ export default function RoomDetail({
           ...prev.filter((story) => story.id !== storyId),
         ])
         showToast('이야기를 등록했어요')
+        notifyStoryToMembers(storyId, title || '제목 없음', 'story_created')
       }
 
       setIsWriteOpen(false)
